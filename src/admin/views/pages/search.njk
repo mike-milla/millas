@@ -1,0 +1,139 @@
+{% extends "layouts/base.njk" %}
+{% block title %}Search{% endblock %}
+{% block topbar_title %}
+  <span class="icon icon-16" style="color:var(--text-muted)">
+    <svg viewBox="0 0 24 24"><use href="#ic-search"/></svg>
+  </span>
+  {% if query %}Search: {{ query }}{% else %}Search{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{{ adminPrefix }}/">
+    <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-grid"/></svg></span>
+  </a>
+  <span class="breadcrumb-sep">›</span>
+  <span class="breadcrumb-current">Search</span>
+</div>
+
+{# ── Search box (large, prominent) ── #}
+<div class="card mb-5" style="max-width:600px">
+  <div class="card-body" style="padding:20px">
+    <form action="{{ adminPrefix }}/search" method="GET">
+      <div class="flex items-center gap-3">
+        <div class="search-wrap" style="flex:1">
+          <span class="search-icon-inner">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </span>
+          <input
+            type="text"
+            name="q"
+            value="{{ query }}"
+            placeholder="Search across all resources…"
+            class="form-control search-input"
+            style="width:100%;font-size:14px;padding-top:10px;padding-bottom:10px"
+            autofocus
+            autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary">Search</button>
+        {% if query %}
+        <a href="{{ adminPrefix }}/search" class="btn btn-ghost">Clear</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── No query ── #}
+{% if not query %}
+<div class="empty-state" style="padding:40px 20px">
+  <div class="empty-icon">
+    <span class="icon icon-22"><svg viewBox="0 0 24 24"><use href="#ic-search"/></svg></span>
+  </div>
+  <div class="empty-title">Search your data</div>
+  <div class="empty-desc">Type in the box above to search across all registered resources simultaneously.</div>
+  <div class="flex items-center gap-2 mt-3" style="justify-content:center;flex-wrap:wrap">
+    {% for resource in resources %}
+    <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost btn-sm">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-table"/></svg></span>
+      {{ resource.label }}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── No results ── #}
+{% elif not results | length %}
+<div class="empty-state" style="padding:40px 20px">
+  <div class="empty-icon">
+    <span class="icon icon-22"><svg viewBox="0 0 24 24"><use href="#ic-search"/></svg></span>
+  </div>
+  <div class="empty-title">No results found</div>
+  <div class="empty-desc">
+    Nothing matched <strong>"{{ query }}"</strong>. Try a different search term, or make sure the resource has
+    <code style="font-family:'DM Mono',monospace;background:var(--surface3);padding:1px 5px;border-radius:3px;font-size:12px">static searchable</code>
+    columns defined.
+  </div>
+</div>
+
+{# ── Results ── #}
+{% else %}
+<div class="text-sm text-muted mb-4">
+  Found <strong>{{ total }}</strong> result{{ 's' if total != 1 }} for "<strong>{{ query }}</strong>" across {{ results | length }} resource{{ 's' if results | length != 1 }}
+</div>
+
+{% for group in results %}
+<div class="card mb-5">
+  <div class="card-header">
+    <span class="card-title">
+      <span class="icon icon-15" style="color:var(--primary)">
+        <svg viewBox="0 0 24 24"><use href="#ic-{{ group.icon or 'table' }}"/></svg>
+      </span>
+      {{ group.label }}
+      <span class="badge badge-blue" style="font-size:10.5px">{{ group.total }} result{{ 's' if group.total != 1 }}</span>
+    </span>
+    {% if group.total > group.rows | length %}
+    <a href="{{ adminPrefix }}/{{ group.slug }}?search={{ query }}" class="btn btn-ghost btn-sm">
+      View all {{ group.total }}
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-chevron-right"/></svg></span>
+    </a>
+    {% endif %}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% for field in group.listFields %}
+          <th>{{ field.label }}</th>
+          {% endfor %}
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr>
+          {% for field in group.listFields %}
+          <td {% if loop.first %}class="td-primary"{% endif %}>{{ row[field.name] | adminCell(field) | safe }}</td>
+          {% endfor %}
+          <td class="col-actions">
+            <div class="flex items-center gap-1" style="justify-content:flex-end">
+              <a href="{{ adminPrefix }}/{{ group.slug }}/{{ row.id }}" class="btn btn-ghost btn-xs">
+                <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
+              </a>
+              <a href="{{ adminPrefix }}/{{ group.slug }}/{{ row.id }}/edit" class="btn btn-ghost btn-xs">
+                <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+{% endif %}
+{% endblock %}

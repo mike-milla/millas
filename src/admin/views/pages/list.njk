@@ -1,0 +1,359 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ resource.label }}{% endblock %}
+{% block topbar_title %}
+  <span class="icon icon-16" style="color:var(--text-muted)">
+    <svg viewBox="0 0 24 24"><use href="#ic-table"/></svg>
+  </span>
+  {{ resource.label }}
+  <span class="badge badge-gray" style="font-size:11px;font-weight:500">{{ total }}</span>
+{% endblock %}
+
+{% block topbar_actions %}
+  {% if resource.canCreate %}
+  <a href="{{ adminPrefix }}/{{ resource.slug }}/create" class="btn btn-primary">
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+    New {{ resource.singular }}
+  </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{{ adminPrefix }}/">
+    <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-grid"/></svg></span>
+  </a>
+  <span class="breadcrumb-sep">›</span>
+  <span class="breadcrumb-current">{{ resource.label }}</span>
+</div>
+
+<div class="card">
+
+  {# ── Toolbar ── #}
+  <div class="toolbar">
+    <div class="toolbar-left">
+      {# Search #}
+      <form method="GET" action="{{ adminPrefix }}/{{ resource.slug }}" id="search-form" style="display:flex;gap:8px;align-items:center">
+        <input type="hidden" name="sort"  value="{{ sort }}">
+        <input type="hidden" name="order" value="{{ order }}">
+        {% for key, val in activeFilters %}
+        <input type="hidden" name="filter[{{ key }}]" value="{{ val }}">
+        {% endfor %}
+
+        <div class="search-wrap">
+          <span class="search-icon-inner">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </span>
+          <input
+            type="text"
+            name="search"
+            value="{{ search }}"
+            placeholder="Search {{ resource.label | lower }}…"
+            class="form-control search-input"
+            autocomplete="off">
+        </div>
+        {% if search %}
+        <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost btn-sm" title="Clear search">
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg></span>
+          Clear
+        </a>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="toolbar-right">
+      {% if filters | length %}
+      <button class="btn btn-ghost btn-sm" onclick="toggleFilters()" id="filter-toggle">
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-filter"/></svg></span>
+        Filters
+        {% if activeFilters | length %}
+        <span class="badge badge-blue" style="font-size:10px;padding:1px 5px">{{ activeFilters | length }}</span>
+        {% endif %}
+      </button>
+      {% endif %}
+
+      {# Export dropdown #}
+      <div class="action-menu">
+        <button class="btn btn-ghost btn-sm action-menu-btn">
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
+          Export
+          <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-chevron-down"/></svg></span>
+        </button>
+        <div class="action-dropdown" style="right:0;min-width:160px">
+          <a href="{{ adminPrefix }}/{{ resource.slug }}/export.csv?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
+            <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
+            Export CSV
+          </a>
+          <a href="{{ adminPrefix }}/{{ resource.slug }}/export.json?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
+            <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
+            Export JSON
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Bulk action bar ── #}
+  <div class="bulk-bar" id="bulk-bar">
+    <span class="bulk-count" id="bulk-count">0 selected</span>
+    <span class="text-muted" style="font-size:12px">—</span>
+    <button class="btn btn-ghost btn-sm btn-danger" onclick="bulkDelete()">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+      Delete selected
+    </button>
+    <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg></span>
+      Cancel
+    </button>
+  </div>
+
+  {# ── Filter panel ── #}
+  {% if filters | length %}
+  <div class="filter-row" id="filter-panel" style="display:none">
+    <form method="GET" action="{{ adminPrefix }}/{{ resource.slug }}" id="filter-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;width:100%">
+      <input type="hidden" name="search" value="{{ search }}">
+      <input type="hidden" name="sort"   value="{{ sort }}">
+      <input type="hidden" name="order"  value="{{ order }}">
+
+      {% for filter in filters %}
+      <div class="filter-group">
+        <label class="filter-label">{{ filter.label }}</label>
+        {% if filter.type == 'select' %}
+        <select name="filter[{{ filter.name }}]" class="filter-control" style="min-width:120px" onchange="this.form.submit()">
+          <option value="">All</option>
+          {% for opt in filter.options %}
+          <option value="{{ opt }}" {% if activeFilters[filter.name] == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+        {% elif filter.type == 'boolean' %}
+        <select name="filter[{{ filter.name }}]" class="filter-control" style="min-width:100px" onchange="this.form.submit()">
+          <option value="">All</option>
+          <option value="1" {% if activeFilters[filter.name] == '1' %}selected{% endif %}>Yes</option>
+          <option value="0" {% if activeFilters[filter.name] == '0' %}selected{% endif %}>No</option>
+        </select>
+        {% elif filter.type == 'text' %}
+        <input type="text" name="filter[{{ filter.name }}]" class="filter-control" style="min-width:130px"
+          value="{{ activeFilters[filter.name] or '' }}" placeholder="Filter…">
+        {% elif filter.type == 'dateRange' %}
+        <input type="date" name="filter[{{ filter.name }}__gte]" class="filter-control"
+          value="{{ activeFilters[filter.name + '__gte'] or '' }}">
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      <div class="filter-group" style="flex-direction:row;align-items:flex-end;gap:6px;margin-left:auto">
+        <button type="submit" class="btn btn-ghost btn-sm">Apply</button>
+        {% if activeFilters | length %}
+        <a href="{{ adminPrefix }}/{{ resource.slug }}{% if search %}?search={{ search }}{% endif %}" class="btn btn-ghost btn-sm">
+          <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg></span>
+          Reset
+        </a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {# ── Table ── #}
+  <div class="table-wrap">
+    {% if rows | length %}
+    <table id="data-table">
+      <thead>
+        <tr>
+          <th class="col-check">
+            <input type="checkbox" class="row-check" id="check-all" onchange="toggleAll(this)" title="Select all">
+          </th>
+          {% for field in listFields %}
+          {% set isSorted = sort == field.name %}
+          <th class="
+            {% if field.name in sortable %}sortable{% endif %}
+            {% if isSorted %}sort-{{ order }} sort-active{% endif %}
+          ">
+            {% if field.name in sortable %}
+            <a href="{{ adminPrefix }}/{{ resource.slug }}?sort={{ field.name }}&order={{ 'desc' if (isSorted and order == 'asc') else 'asc' }}&search={{ search }}&page={{ page }}" style="color:inherit;text-decoration:none;display:flex;align-items:center;gap:4px">
+              {{ field.label }}
+              {% if field.name in sortable %}
+              <span class="sort-indicator">
+                <span class="up"></span>
+                <span class="down"></span>
+              </span>
+              {% endif %}
+            </a>
+            {% else %}
+            {{ field.label }}
+            {% endif %}
+          </th>
+          {% endfor %}
+          {% if resource.canEdit or resource.canDelete %}
+          <th class="col-actions">Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr data-id="{{ row.id }}">
+          <td class="col-check">
+            <input type="checkbox" class="row-check item-check" value="{{ row.id }}" onchange="updateBulkBar()">
+          </td>
+          {% for field in listFields %}
+          <td class="{% if loop.first %}td-primary{% endif %}">{{ row[field.name] | adminCell(field) | safe }}</td>
+          {% endfor %}
+          {% if resource.canEdit or resource.canDelete %}
+          <td class="col-actions">
+            <div class="action-menu">
+              <button class="action-menu-btn">
+                <span class="icon icon-14">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="5" r="1.2" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+              </button>
+              <div class="action-dropdown">
+                {% if resource.canEdit %}
+                <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/edit">
+                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+                  Edit
+                </a>
+                {% endif %}
+                <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}" style="display:none">
+                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
+                  View
+                </a>
+                {% if resource.canDelete %}
+                <div class="sep"></div>
+                <button class="danger" onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/delete', '#{{ row.id }}')">
+                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+                  Delete
+                </button>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {# ── Pagination ── #}
+    {% if lastPage > 1 %}
+    <div class="pagination">
+      <a class="page-btn {% if page <= 1 %}disabled{% endif %}"
+        href="{{ adminPrefix }}/{{ resource.slug }}?page={{ page - 1 }}&sort={{ sort }}&order={{ order }}&search={{ search }}"
+        {% if page <= 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-chevron-left"/></svg></span>
+      </a>
+
+      {% for p in range(1, lastPage + 1) %}
+        {% if p == 1 or p == lastPage or (p >= page - 2 and p <= page + 2) %}
+          <a class="page-btn {% if p == page %}active{% endif %}"
+            href="{{ adminPrefix }}/{{ resource.slug }}?page={{ p }}&sort={{ sort }}&order={{ order }}&search={{ search }}">
+            {{ p }}
+          </a>
+        {% elif p == 2 and page > 4 %}
+          <span class="page-ellipsis">…</span>
+        {% elif p == lastPage - 1 and page < lastPage - 3 %}
+          <span class="page-ellipsis">…</span>
+        {% endif %}
+      {% endfor %}
+
+      <a class="page-btn {% if page >= lastPage %}disabled{% endif %}"
+        href="{{ adminPrefix }}/{{ resource.slug }}?page={{ page + 1 }}&sort={{ sort }}&order={{ order }}&search={{ search }}"
+        {% if page >= lastPage %}tabindex="-1" aria-disabled="true"{% endif %}>
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-chevron-right"/></svg></span>
+      </a>
+
+      <span class="page-info">
+        {{ (page - 1) * perPage + 1 }}–{{ [page * perPage, total] | min }} of {{ total }}
+      </span>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">
+        <span class="icon icon-22"><svg viewBox="0 0 24 24"><use href="#ic-table"/></svg></span>
+      </div>
+      <div class="empty-title">No {{ resource.label }} found</div>
+      <div class="empty-desc">
+        {% if search %}
+          No results for "<strong>{{ search }}</strong>". Try a different search term.
+        {% elif activeFilters | length %}
+          No records match the active filters.
+        {% else %}
+          Get started by creating your first record.
+        {% endif %}
+      </div>
+      {% if resource.canCreate %}
+      <a href="{{ adminPrefix }}/{{ resource.slug }}/create" class="btn btn-primary">
+        <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+        New {{ resource.singular }}
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  // ── Filter panel toggle ──────────────────────────────────────
+  const filterPanel = document.getElementById('filter-panel');
+  {% if activeFilters | length %}
+  if (filterPanel) filterPanel.style.display = 'flex';
+  {% endif %}
+
+  function toggleFilters() {
+    if (!filterPanel) return;
+    const shown = filterPanel.style.display !== 'none';
+    filterPanel.style.display = shown ? 'none' : 'flex';
+  }
+
+  // ── Live search on Enter ──────────────────────────────────────
+  const searchForm = document.getElementById('search-form');
+  if (searchForm) {
+    searchForm.querySelector('input[name="search"]')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') searchForm.submit();
+    });
+  }
+
+  // ── Bulk selection ────────────────────────────────────────────
+  const bulkBar   = document.getElementById('bulk-bar');
+  const bulkCount = document.getElementById('bulk-count');
+
+  function updateBulkBar() {
+    const checked = document.querySelectorAll('.item-check:checked');
+    const n = checked.length;
+    bulkBar.classList.toggle('visible', n > 0);
+    if (bulkCount) bulkCount.textContent = `${n} selected`;
+    const all = document.getElementById('check-all');
+    if (all) {
+      const total = document.querySelectorAll('.item-check').length;
+      all.indeterminate = n > 0 && n < total;
+      all.checked = n > 0 && n === total;
+    }
+  }
+
+  function toggleAll(master) {
+    document.querySelectorAll('.item-check').forEach(c => { c.checked = master.checked; });
+    updateBulkBar();
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.item-check, #check-all').forEach(c => { c.checked = false; c.indeterminate = false; });
+    updateBulkBar();
+  }
+
+  function bulkDelete() {
+    const ids = [...document.querySelectorAll('.item-check:checked')].map(c => c.value);
+    if (!ids.length) return;
+    confirmDelete(
+      '{{ adminPrefix }}/{{ resource.slug }}/bulk-delete',
+      `${ids.length} record${ids.length > 1 ? 's' : ''}`
+    );
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,302 @@
+{% extends "layouts/base.njk" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <span class="icon icon-13" style="color:var(--text-xmuted)"><svg viewBox="0 0 24 24"><use href="#ic-grid"/></svg></span>
+  <span class="breadcrumb-sep">›</span>
+  <span class="breadcrumb-current">Dashboard</span>
+</div>
+
+{% if not resources | length %}
+{# ── Empty / onboarding state ── #}
+<div class="card">
+  <div class="card-body">
+    <div class="empty-state">
+      <div class="empty-icon">
+        <span class="icon icon-24"><svg viewBox="0 0 24 24"><use href="#ic-database"/></svg></span>
+      </div>
+      <div class="empty-title">Welcome to Millas Admin</div>
+      <div class="empty-desc">Register your models to start managing your data.</div>
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:left;font-family:'DM Mono',monospace;font-size:12px;margin:0 auto;max-width:480px;overflow-x:auto;color:var(--text-soft)">Admin.register(UserResource);
+Admin.mount(expressApp);</pre>
+    </div>
+  </div>
+</div>
+
+{% else %}
+
+{# ── Two-column layout: main + activity sidebar ── #}
+<div class="dash-layout">
+
+  {# ════════ LEFT COLUMN ════════ #}
+  <div class="dash-main">
+
+    {# ── Stat cards ── #}
+    <div class="stats-grid mb-5">
+      {% for resource in resources %}
+      <a href="{{ adminPrefix }}/{{ resource.slug }}" class="stat-card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="stat-icon-wrap">
+            <span class="icon icon-18"><svg viewBox="0 0 24 24"><use href="#ic-{{ resource.icon or 'table' }}"/></svg></span>
+          </div>
+          {% if resource.recentCount > 0 %}
+          <span class="badge badge-green" style="font-size:10.5px">
+            +{{ resource.recentCount }} this week
+          </span>
+          {% endif %}
+        </div>
+        <div class="stat-value">{{ resource.count if resource.count is defined else '—' }}</div>
+        <div class="stat-label" style="margin-top:4px">{{ resource.label }}</div>
+      </a>
+      {% endfor %}
+    </div>
+
+    {# ── Activity summary bar ── #}
+    {% if activityTotals %}
+    <div class="card mb-5" style="overflow:visible">
+      <div class="card-body" style="padding:16px 20px">
+        <div class="flex items-center gap-4 flex-wrap">
+          <span class="text-sm fw-600" style="color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Today's activity</span>
+          <div class="flex items-center gap-3" style="flex:1;flex-wrap:wrap">
+            <div class="activity-pill activity-create">
+              <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+              {{ activityTotals.create }} created
+            </div>
+            <div class="activity-pill activity-update">
+              <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+              {{ activityTotals.update }} updated
+            </div>
+            <div class="activity-pill activity-delete">
+              <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+              {{ activityTotals.delete }} deleted
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Recent records per resource ── #}
+    {% for resource in resources %}
+    {% if resource.recent | length %}
+    <div class="card mb-5">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="icon icon-15" style="color:var(--primary)">
+            <svg viewBox="0 0 24 24"><use href="#ic-{{ resource.icon or 'table' }}"/></svg>
+          </span>
+          Recent {{ resource.label }}
+        </span>
+        <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost btn-sm">
+          View all
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-chevron-right"/></svg></span>
+        </a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {% for field in resource.listFields %}
+              <th>{{ field.label }}</th>
+              {% endfor %}
+              <th class="col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in resource.recent %}
+            <tr>
+              {% for field in resource.listFields %}
+              <td {% if loop.first %}class="td-primary"{% endif %}>{{ row[field.name] | adminCell(field) | safe }}</td>
+              {% endfor %}
+              <td class="col-actions">
+                <div class="flex items-center gap-1" style="justify-content:flex-end">
+                  <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}" class="btn btn-ghost btn-xs">
+                    <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
+                  </a>
+                  <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/edit" class="btn btn-ghost btn-xs">
+                    <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+  </div>{# end dash-main #}
+
+  {# ════════ RIGHT COLUMN — Activity feed ════════ #}
+  <div class="dash-sidebar">
+
+    {# ── Quick actions ── #}
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="icon icon-14" style="color:var(--primary)"><svg viewBox="0 0 24 24"><use href="#ic-activity"/></svg></span>
+          Quick Actions
+        </span>
+      </div>
+      <div style="padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+        {% for resource in resources %}
+        <a href="{{ adminPrefix }}/{{ resource.slug }}/create" class="quick-action-btn">
+          <span class="icon icon-13" style="color:var(--primary)"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+          New {{ resource.singular }}
+          <span class="icon icon-12 ml-auto" style="color:var(--text-xmuted)"><svg viewBox="0 0 24 24"><use href="#ic-chevron-right"/></svg></span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# ── Activity feed ── #}
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="icon icon-14" style="color:var(--primary)"><svg viewBox="0 0 24 24"><use href="#ic-list"/></svg></span>
+          Recent Activity
+        </span>
+      </div>
+
+      {% if activity | length %}
+      <div style="divide-y:var(--border)">
+        {% for entry in activity %}
+        <div class="feed-entry">
+          <div class="feed-dot feed-dot-{{ entry.action }}">
+            {% if entry.action == 'create' %}
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            {% elif entry.action == 'update' %}
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            {% else %}
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            {% endif %}
+          </div>
+          <div class="feed-body">
+            <div class="feed-text">
+              <span class="feed-action feed-action-{{ entry.action }}">{{ entry.action | capitalize }}</span>
+              <span class="feed-label">{{ entry.label }}</span>
+              <span class="feed-resource">in {{ entry.resource }}</span>
+            </div>
+            <div class="feed-time" title="{{ entry.at }}">{{ entry.at | relativeTime }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state" style="padding:32px 20px">
+        <div class="empty-icon" style="width:36px;height:36px;margin:0 auto 12px">
+          <span class="icon icon-18"><svg viewBox="0 0 24 24"><use href="#ic-activity"/></svg></span>
+        </div>
+        <div class="empty-title" style="font-size:13px">No activity yet</div>
+        <div class="empty-desc" style="font-size:12px">Actions will appear here as you manage data.</div>
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Keyboard shortcuts cheatsheet ── #}
+    <div class="card mt-4" style="background:var(--surface2)">
+      <div class="card-header" style="background:transparent">
+        <span class="card-title text-sm" style="color:var(--text-muted)">
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-settings"/></svg></span>
+          Keyboard Shortcuts
+        </span>
+      </div>
+      <div style="padding:10px 16px;display:flex;flex-direction:column;gap:7px">
+        {% set shortcuts = [
+          ['/', 'Focus search'],
+          ['N', 'New record (on list)'],
+          ['G + D', 'Go to Dashboard'],
+          ['G + 1–9', 'Jump to resource'],
+          ['Esc', 'Close modal / blur']
+        ] %}
+        {% for sc in shortcuts %}
+        <div class="shortcut-row">
+          <span class="kbd">{{ sc[0] }}</span>
+          <span class="shortcut-desc">{{ sc[1] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>{# end dash-sidebar #}
+</div>{# end dash-layout #}
+
+{% endif %}
+
+<style>
+  .dash-layout {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .dash-layout { grid-template-columns: 1fr; }
+    .dash-sidebar { display: none; }
+  }
+
+  /* ── Activity pills ── */
+  .activity-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 99px;
+    font-size: 12px; font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .activity-create { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+  .activity-update { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+  .activity-delete { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+
+  /* ── Activity feed ── */
+  .feed-entry {
+    display: flex; gap: 10px; padding: 10px 16px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .feed-entry:last-child { border-bottom: none; }
+  .feed-dot {
+    width: 20px; height: 20px; border-radius: 99px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px;
+  }
+  .feed-dot-create { background: var(--success-bg); color: var(--success); }
+  .feed-dot-update { background: var(--info-bg);    color: var(--info); }
+  .feed-dot-delete { background: var(--danger-bg);  color: var(--danger); }
+  .feed-body { flex: 1; min-width: 0; }
+  .feed-text { font-size: 12.5px; color: var(--text-soft); line-height: 1.4; }
+  .feed-action { font-weight: 600; }
+  .feed-action-create { color: var(--success); }
+  .feed-action-update { color: var(--info); }
+  .feed-action-delete { color: var(--danger); }
+  .feed-label    { color: var(--text); font-weight: 500; margin: 0 3px; }
+  .feed-resource { color: var(--text-muted); }
+  .feed-time     { font-size: 11px; color: var(--text-xmuted); margin-top: 2px; }
+
+  /* ── Quick actions ── */
+  .quick-action-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: var(--radius-sm);
+    font-size: 13px; color: var(--text-soft); text-decoration: none;
+    transition: background .1s;
+  }
+  .quick-action-btn:hover { background: var(--surface2); color: var(--text); }
+
+  /* ── Shortcuts ── */
+  .shortcut-row { display: flex; align-items: center; gap: 10px; }
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface); border: 1px solid var(--border);
+    border-bottom-width: 2px; border-radius: 4px;
+    padding: 2px 6px; font-family: 'DM Mono', monospace;
+    font-size: 11px; color: var(--text-soft);
+    white-space: nowrap; min-width: 28px; text-align: center;
+    box-shadow: 0 1px 0 var(--border);
+  }
+  .shortcut-desc { font-size: 12px; color: var(--text-muted); }
+</style>
+{% endblock %}

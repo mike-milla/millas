@@ -1,0 +1,322 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ resource.singular }} #{{ record.id }}{% endblock %}
+{% block topbar_title %}
+  <span class="icon icon-16" style="color:var(--text-muted)">
+    <svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg>
+  </span>
+  {{ resource.singular }} #{{ record.id }}
+{% endblock %}
+
+{% block topbar_actions %}
+  {% if resource.canEdit %}
+  <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/edit" class="btn btn-primary">
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+    Edit
+  </a>
+  {% endif %}
+  <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost">
+    <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-arrow-left"/></svg></span>
+    Back
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{{ adminPrefix }}/">
+    <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-grid"/></svg></span>
+  </a>
+  <span class="breadcrumb-sep">›</span>
+  <a href="{{ adminPrefix }}/{{ resource.slug }}">{{ resource.label }}</a>
+  <span class="breadcrumb-sep">›</span>
+  <span class="breadcrumb-current">#{{ record.id }}</span>
+</div>
+
+<div style="max-width:860px">
+
+  {# ── Header card with key identity fields ── #}
+  <div class="card mb-4">
+    <div class="card-header">
+      <div class="flex items-center gap-3">
+        <div style="width:42px;height:42px;background:var(--primary-soft);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--primary)">
+          <span class="icon icon-20">
+            <svg viewBox="0 0 24 24"><use href="#ic-{{ resource.icon or 'file' }}"/></svg>
+          </span>
+        </div>
+        <div>
+          <div class="fw-600" style="font-size:15px">{{ resource.singular }} #{{ record.id }}</div>
+          <div class="text-muted text-sm">
+            {% if record.created_at %}Created {{ record.created_at }}{% endif %}
+            {% if record.updated_at %} · Updated {{ record.updated_at }}{% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        {% if resource.canEdit %}
+        <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/edit" class="btn btn-ghost btn-sm">
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
+          Edit
+        </a>
+        {% endif %}
+        {% if resource.canDelete %}
+        <button class="btn btn-danger btn-sm"
+          onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/delete', '{{ resource.singular }} #{{ record.id }}')">
+          <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+          Delete
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── Tabbed detail fields ── #}
+  {% if hasTabs %}
+  {# ── Tab nav ── #}
+  <div class="tab-nav mb-4" id="tab-nav">
+    {% for tab in tabs %}
+    <button
+      class="tab-btn {% if loop.first %}active{% endif %}"
+      data-tab="{{ loop.index0 }}"
+      onclick="switchTab({{ loop.index0 }})">
+      {{ tab.label or 'General' }}
+    </button>
+    {% endfor %}
+  </div>
+
+  {% for tab in tabs %}
+  <div class="tab-panel {% if loop.first %}active{% endif %}" id="tab-{{ loop.index0 }}">
+    <div class="card mb-4">
+      {% if tab.label %}
+      <div class="card-header">
+        <span class="card-title">{{ tab.label }}</span>
+      </div>
+      {% endif %}
+      <div class="card-body">
+        <div class="detail-grid">
+          {% for field in tab.fields %}
+          {% if not field.hidden and not field.listOnly %}
+          <div class="detail-item {% if field.span == 'full' %}full{% elif field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full{% endif %}">
+            <div class="detail-label">{{ field.label }}</div>
+            <div class="detail-value">
+              {% set val = record[field.name] %}
+              {% include "partials/detail-value.njk" ignore missing %}
+              {{ val | adminCell(field) | safe if val is not none else '<span class="cell-muted">—</span>' }}
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% else %}
+
+  {# ── No tabs — single card ── #}
+  <div class="card">
+    <div class="card-body">
+      <div class="detail-grid">
+        {% for field in detailFields %}
+        {% if field._isFieldset %}
+        <div class="detail-fieldset-heading">{{ field.label }}</div>
+        {% elif not field.hidden and not field.listOnly %}
+        <div class="detail-item {% if field.span == 'full' %}full{% elif field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full{% endif %}">
+          <div class="detail-label">{{ field.label }}</div>
+          <div class="detail-value">
+            {% set val = record[field.name] %}
+            {{ val | adminDetail(field) | safe }}
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% endif %}
+
+  {# ── Navigation footer ── #}
+  <div class="flex items-center gap-3" style="margin-top:16px;padding:0 2px">
+    <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost btn-sm">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-arrow-left"/></svg></span>
+      Back to {{ resource.label }}
+    </a>
+    {% if resource.canCreate %}
+    <a href="{{ adminPrefix }}/{{ resource.slug }}/create" class="btn btn-ghost btn-sm" style="margin-left:auto">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+      New {{ resource.singular }}
+    </a>
+    {% endif %}
+  </div>
+
+  {# ── Custom row actions ── #}
+  {% if resource.rowActions | length %}
+  <div class="flex items-center gap-2" style="margin-top:12px;padding:0 2px;flex-wrap:wrap">
+    {% for ra in resource.rowActions %}
+    {% if ra.href %}
+    <a href="{{ ra.href }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+      <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ ra.icon or 'eye' }}"/></svg></span>
+      {{ ra.label }}
+    </a>
+    {% elif ra.action %}
+    <form method="POST" action="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/action/{{ ra.action }}" style="display:inline">
+      <button type="submit" class="btn btn-ghost btn-sm">
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ ra.icon or 'check' }}"/></svg></span>
+        {{ ra.label }}
+      </button>
+    </form>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+
+{# ════════════════════════════════════════
+   INLINE RELATED RECORDS
+   ════════════════════════════════════════ #}
+{% if inlines | length %}
+<div style="max-width:860px;margin-top:24px">
+  {% for inline in inlines %}
+  <div class="card mb-5">
+    <div class="card-header">
+      <span class="card-title">
+        <span class="icon icon-15" style="color:var(--primary)">
+          <svg viewBox="0 0 24 24"><use href="#ic-table"/></svg>
+        </span>
+        {{ inline.label }}
+        {% if inline.rows | length %}
+        <span class="badge badge-gray" style="font-size:10.5px">{{ inline.rows | length }}</span>
+        {% endif %}
+      </span>
+      {% if inline.canCreate %}
+      <a href="{{ adminPrefix }}/{{ inline.label | lower | replace(' ', '-') }}/create?{{ inline.foreignKey }}={{ record.id }}"
+         class="btn btn-ghost btn-sm">
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+        Add {{ inline.label | replace('s','') if inline.label | last == 's' else inline.label }}
+      </a>
+      {% endif %}
+    </div>
+
+    {% if inline.rows | length %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {% for field in inline.fields %}
+            <th>{{ field.label }}</th>
+            {% endfor %}
+            {% if inline.canDelete %}
+            <th class="col-actions">Actions</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inline.rows %}
+          <tr>
+            {% for field in inline.fields %}
+            <td {% if loop.first %}class="td-primary"{% endif %}>
+              {{ row[field.name] | adminCell(field) | safe if row[field.name] is not none else '<span class="cell-muted">—</span>' }}
+            </td>
+            {% endfor %}
+            {% if inline.canDelete %}
+            <td class="col-actions" style="text-align:right">
+              <button
+                onclick="confirmDelete('{{ adminPrefix }}/{{ inline.label | lower | replace(' ','-') }}/{{ row.id }}/delete','{{ inline.label | replace('s','') if inline.label | last == 's' else inline.label }} #{{ row.id }}')"
+                class="btn btn-danger btn-xs">
+                <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+              </button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:28px 20px">
+      <div class="empty-icon" style="width:32px;height:32px;margin:0 auto 10px">
+        <span class="icon icon-16"><svg viewBox="0 0 24 24"><use href="#ic-table"/></svg></span>
+      </div>
+      <div class="empty-title" style="font-size:13px">No {{ inline.label | lower }} yet</div>
+      {% if inline.canCreate %}
+      <a href="{{ adminPrefix }}/{{ inline.label | lower | replace(' ', '-') }}/create?{{ inline.foreignKey }}={{ record.id }}"
+         class="btn btn-ghost btn-sm" style="margin-top:10px">
+        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
+        Add first
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<style>
+  .tab-nav {
+    display: flex; gap: 0; overflow-x: auto;
+    border-bottom: 2px solid var(--border);
+  }
+  .tab-btn {
+    padding: 9px 16px; font-size: 13.5px; font-weight: 500;
+    color: var(--text-muted); background: none; border: none;
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+    transition: color .12s, border-color .12s;
+  }
+  .tab-btn:hover  { color: var(--text-soft); }
+  .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab-panel        { display: none; }
+  .tab-panel.active { display: block; }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .detail-item {
+    padding: 13px 0;
+    border-bottom: 1px solid var(--border-soft);
+    display: grid;
+    grid-template-columns: 155px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .detail-item:last-child { border-bottom: none; }
+  .detail-item.full { grid-column: 1 / -1; }
+  .detail-label {
+    font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .4px; padding-top: 1px;
+  }
+  .detail-value { font-size: 13.5px; color: var(--text-soft); word-break: break-word; }
+  .detail-value pre {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px;
+    font-family: 'DM Mono', monospace; font-size: 12px;
+    overflow-x: auto; margin: 0; white-space: pre-wrap;
+  }
+
+  /* Fieldset heading in detail view */
+  .detail-fieldset-heading {
+    grid-column: 1 / -1;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .6px; color: var(--text-muted);
+    padding: 16px 0 8px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  @media (max-width: 640px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .detail-item { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+
+<script>
+  function switchTab(idx) {
+    document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+    document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === idx));
+  }
+</script>
+{% endblock %}

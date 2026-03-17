@@ -1,0 +1,56 @@
+'use strict';
+
+const Middleware = require('../middleware/Middleware');
+const HttpError  = require('../errors/HttpError');
+const Auth       = require('./Auth');
+
+/**
+ * AuthMiddleware
+ *
+ * Guards routes from unauthenticated access using JWT.
+ * Reads the Bearer token from the Authorization header,
+ * verifies it, loads the user, and attaches them to req.user.
+ *
+ * Uses the Millas middleware signature: handle(req, next)
+ * No Express res — returns a MillasResponse or calls next().
+ */
+class AuthMiddleware extends Middleware {
+  async handle({ headers, req }, next) {
+    const header = headers.authorization || headers.Authorization;
+
+    if (!header) {
+      throw new HttpError(401, 'Authorization header missing');
+    }
+
+    if (!header.startsWith('Bearer ')) {
+      throw new HttpError(401, 'Invalid authorization format. Use: Bearer <token>');
+    }
+
+    const token = header.slice(7);
+    if (!token) {
+      throw new HttpError(401, 'Token is empty');
+    }
+
+    const payload = Auth.verify(token);
+
+    let user;
+    try {
+      user = await Auth.user(req.raw);
+    } catch {
+      throw new HttpError(401, 'Authentication service not configured');
+    }
+
+    if (!user) {
+      throw new HttpError(401, 'User not found or has been deleted');
+    }
+
+    // Attach to the underlying request so downstream handlers see req.user
+    req.raw.user         = user;
+    req.raw.token        = token;
+    req.raw.tokenPayload = payload;
+
+    return next();
+  }
+}
+
+module.exports = AuthMiddleware;
