@@ -92,7 +92,6 @@ class HttpServer {
             this._options.port ||
             parseInt(process.env.MILLAS_INTERNAL_PORT, 10) ||
             parseInt(process.env.APP_PORT, 10) ||
-            parseInt(process.env.PORT, 10) ||
             3000;
 
         return this._normalizePort(raw);

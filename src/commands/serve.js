@@ -198,13 +198,15 @@ module.exports = function (program) {
     program
         .command('serve')
         .description('Start the development server with hot reload')
-        .option('-p, --port <port>', 'Port to listen on', '3000')
+        .option('-p, --port <port>', 'Port to listen on')
         .option('-h, --host <host>', 'Host to bind to', 'localhost')
         .option('--no-reload', 'Disable hot reload (run once, like production)')
         .action((options) => {
 
+            require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+
             const restoreAfterPatch = patchConsole(Logger,"SystemOut")
-            const appBootstrap = path.resolve(process.cwd(), 'bootstrap/app.js');
+            let appBootstrap = path.resolve(process.cwd(), 'bootstrap/app.js');
 
             if (!fs.existsSync(appBootstrap)) {
                 process.stderr.write(chalk.red('\n  ✖  No Millas project found here.\n'));
@@ -212,8 +214,7 @@ module.exports = function (program) {
                 process.exit(1);
             }
 
-
-            const publicPort = parseInt(options.port, 10) || 3000;
+            const publicPort = parseInt(options.port ||process.env.APP_PORT, 10) || 3000;
             const publicHost = options.host || 'localhost';
 
             const env = {
@@ -227,7 +228,6 @@ module.exports = function (program) {
             printBanner(publicHost, publicPort);
 
             if (options.reload !== false) {
-
                 new HotReloader(appBootstrap, publicPort, publicHost).start();
             } else {
                 try {

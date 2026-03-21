@@ -19,8 +19,17 @@ class SecurityBootstrap {
       app.use(globalRateLimit.middleware());
     }
 
+    // ── CSRF ──────────────────────────────────────────────────────────────────
+    // The admin panel (/admin) manages its own CSRF via AdminAuth.
+    // Auto-exclude it so the framework CSRF doesn't double-protect it.
     if (config.csrf !== false) {
-      app.use(CsrfMiddleware.from(config.csrf || {}).middleware());
+      const csrfConfig  = config.csrf || {};
+      const adminPrefix = config.adminPrefix || '/admin';
+      const excluded    = [...(csrfConfig.exclude || [])];
+      if (!excluded.some(p => p === adminPrefix || p.startsWith(adminPrefix + '/'))) {
+        excluded.push(adminPrefix + '/');
+      }
+      app.use(CsrfMiddleware.from({ ...csrfConfig, exclude: excluded }).middleware());
     }
 
     SecurityBootstrap._registerErrorHandler(app);
@@ -51,6 +60,7 @@ class SecurityBootstrap {
       next(err);
     });
   }
+
   static loadConfig(configPath) {
     const path = require('path');
     const fs   = require('fs');
