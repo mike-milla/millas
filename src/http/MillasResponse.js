@@ -1,5 +1,14 @@
 'use strict';
 
+// Secure cookie defaults — can be overridden per-call or via config/security.js
+// These are applied in cookie() below; callers can override any individual option.
+let _cookieDefaults = {
+  httpOnly: true,
+  secure:   process.env.NODE_ENV === 'production',
+  sameSite: 'Lax',
+  path:     '/',
+};
+
 /**
  * MillasResponse
  *
@@ -97,24 +106,53 @@ class MillasResponse {
   /**
    * Set a cookie on the response.
    *
-   *   return jsonify(data).cookie('token', value, { httpOnly: true, maxAge: 3600 })
+   * Secure defaults (httpOnly, secure, sameSite: Lax, path: /) are applied
+   * automatically. Pass explicit options to override any individual default.
+   *
+   *   // Secure by default — no extra options needed:
+   *   return jsonify(data).cookie('session', token)
+   *
+   *   // Override individual options:
+   *   return jsonify(data).cookie('token', jwt, { maxAge: 3600 })
+   *
+   *   // Opt out of a default (e.g. a non-sensitive preference cookie):
+   *   return jsonify(data).cookie('theme', 'dark', { httpOnly: false })
+   *
+   *   // Cross-site cookie (e.g. OAuth callback) — must also set secure: true:
+   *   return jsonify(data).cookie('oauth_state', state, { sameSite: 'None', secure: true })
    */
   cookie(name, value, options = {}) {
+    // Merge: secure defaults < caller options
+    // This means callers can always override, but never accidentally get insecure defaults
+    const merged = { ..._cookieDefaults, ...options };
     return new MillasResponse({
       type:    this._type,
       body:    this._body,
       status:  this._status,
       headers: this._headers,
-      cookies: { ...this._cookies, [name]: { value, options } },
+      cookies: { ...this._cookies, [name]: { value, options: merged } },
     });
   }
 
   /**
    * Clear a cookie.
+   *
    *   return jsonify(data).clearCookie('session')
+   *
+   * Preserves the same path/domain options used when the cookie was set
+   * so the browser correctly removes it.
    */
   clearCookie(name, options = {}) {
-    return this.cookie(name, '', { ...options, maxAge: 0, expires: new Date(0) });
+    // Must match the path/domain of the original cookie for the browser to delete it.
+    // Merge defaults so path always matches.
+    const clearOpts = { ..._cookieDefaults, ...options, maxAge: 0, expires: new Date(0) };
+    return new MillasResponse({
+      type:    this._type,
+      body:    this._body,
+      status:  this._status,
+      headers: this._headers,
+      cookies: { ...this._cookies, [name]: { value: '', options: clearOpts } },
+    });
   }
 
   // ─── Static factories ─────────────────────────────────────────────────────
@@ -190,6 +228,34 @@ class MillasResponse {
    */
   static isResponse(value) {
     return value instanceof MillasResponse;
+  }
+
+  /**
+   * Override the global cookie defaults.
+   *
+   * Called by the framework bootstrap when it loads config/security.js.
+   * Can also be called by developers for custom defaults:
+   *
+   *   MillasResponse.configureCookieDefaults({
+   *     httpOnly: true,
+   *     secure:   true,
+   *     sameSite: 'Strict',   // stricter than default Lax
+   *   });
+   *
+   * @param {object} defaults
+   */
+  static configureCookieDefaults(defaults = {}) {
+    _cookieDefaults = { ..._cookieDefaults, ...defaults };
+  }
+
+  /**
+   * Get the current cookie defaults (read-only copy).
+   * Useful for debugging or testing.
+   *
+   * @returns {object}
+   */
+  static getCookieDefaults() {
+    return { ..._cookieDefaults };
   }
 }
 

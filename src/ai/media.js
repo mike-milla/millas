@@ -214,11 +214,16 @@ class PendingTranscription {
   async generate() {
     const fs     = require('fs');
     const path   = require('path');
+    const { resolveStoragePath, SafeFilePath } = require('../http/SafeFilePath');
     let   audio, filename, mimeType;
 
     if (this._source.type === 'path') {
-      audio    = fs.readFileSync(this._source.value);
-      filename = path.basename(this._source.value);
+      const safePath = resolveStoragePath(
+        this._source.value,
+        SafeFilePath.getStorageRoot()
+      );
+      audio    = fs.readFileSync(safePath);
+      filename = path.basename(safePath);
       mimeType = _mimeFromExt(path.extname(filename));
     } else if (this._source.type === 'storage') {
       const storage = PendingTranscription._storage;

@@ -75,13 +75,21 @@ class AppInitializer {
         this._adapter = new ExpressAdapter(expressApp);
         this._adapter.applyBodyParsers();
 
+        // ── Security — applied before any routes or developer middleware ──────
+        // Reads config/app.js for overrides. All protections are on by default:
+        // security headers, CSRF, rate limiting, cookie defaults, allowed hosts.
+        const SecurityBootstrap = require('../http/SecurityBootstrap');
+        const basePath          = cfg.basePath || process.cwd();
+        const appConfig         = SecurityBootstrap.loadConfig(basePath + '/config/app');
+        SecurityBootstrap.apply(this._adapter.nativeApp || expressApp, appConfig);
+        // ─────────────────────────────────────────────────────────────────────
+
         for (const mw of (cfg.adapterMiddleware || [])) {
             this._adapter.applyMiddleware(mw);
         }
 
         this._kernel = new Application(this._adapter);
 
-        const basePath = cfg.basePath || process.cwd();
         this._kernel._container.instance('basePath', basePath);
 
         const coreProviders = this._buildCoreProviders(cfg);

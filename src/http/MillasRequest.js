@@ -225,13 +225,26 @@ class MillasRequest {
   // ─── Validation ─────────────────────────────────────────────────────────────
 
   /**
-   * Validate request input against rules. Throws 422 HttpError on failure.
-   * Returns the validated data on success.
+   * Validate request input against rules.
+   * Throws a 422 ValidationError on failure.
+   * Returns the validated + type-coerced data subset on success.
    *
    *   const data = await req.validate({
-   *     name:  'required|string|min:2|max:100',
-   *     email: 'required|email',
-   *     age:   'optional|number|min:0',
+   *     name:     'required|string|min:2|max:100',
+   *     email:    'required|email',
+   *     password: 'required|string|min:8',
+   *     age:      'optional|number|min:13',
+   *   });
+   *
+   * For route-level validation (runs before the handler, result in req.validated):
+   *
+   *   Route.post('/register', {
+   *     validate: {
+   *       email:    'required|email',
+   *       password: 'required|string|min:8',
+   *     },
+   *   }, async (req) => {
+   *     const { email, password } = req.validated;
    *   });
    */
   async validate(rules) {
@@ -239,13 +252,56 @@ class MillasRequest {
     return Validator.validate(this.all(), rules);
   }
 
+  /**
+   * The validated + coerced input — populated by route-level validation middleware.
+   * Null if no route-level validation was declared for this route.
+   *
+   *   Route.post('/login', { validate: { email: 'required|email' } }, async (req) => {
+   *     req.validated.email  // guaranteed valid email string
+   *   });
+   */
+  get validated() {
+    return this._req.validated ?? null;
+  }
+
+  // ─── CSRF ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get the CSRF token for the current request.
+   * Use this in templates to populate the hidden _csrf field.
+   *
+   *   <input type="hidden" name="_csrf" value="<%= req.csrfToken() %>">
+   *
+   * Returns an empty string if CSRF middleware is not active (e.g. API routes).
+   */
+  csrfToken() {
+    if (typeof this._req.csrfToken === 'function') {
+      return this._req.csrfToken();
+    }
+    return '';
+  }
+
   // ─── Escape hatch ────────────────────────────────────────────────────────────
 
   /**
    * The raw underlying Express request.
-   * Only use this when you genuinely need something MillasRequest doesn't expose.
+   *
+   * WARNING: Accessing req.raw bypasses all Millas security abstractions
+   * (validation, CSRF, sanitization). Use only when MillasRequest genuinely
+   * does not expose what you need, and never pass req.raw values directly
+   * to database queries or HTML output without manual sanitization.
    */
   get raw() {
+    if (process.env.NODE_ENV === 'development') {
+      // Help developers discover missing MillasRequest features
+      // rather than defaulting to raw access silently
+      const stack = new Error().stack?.split('\n')[2]?.trim() || '';
+      console.warn(
+        `[Millas] req.raw accessed at ${stack}. ` +
+        'If MillasRequest is missing a feature you need, consider opening an issue ' +
+        'rather than bypassing the abstraction layer.'
+      );
+    }
     return this._req;
   }
 }

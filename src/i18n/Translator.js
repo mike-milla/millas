@@ -321,7 +321,15 @@ class Translator {
         locale = req.query.lang;
         // Persist to cookie so subsequent requests remember
         if (cookie) {
-          res.cookie(cookieName, locale, { maxAge: 60 * 60 * 24 * 365, httpOnly: false });
+          // Locale is a non-sensitive preference value, not a security credential.
+          // httpOnly: false is intentional here so client-side JS can read/switch
+          // the locale without a round-trip. All other secure defaults still apply.
+          res.cookie(cookieName, locale, {
+            maxAge:   60 * 60 * 24 * 365,
+            httpOnly: false,
+            sameSite: 'Lax',
+            secure:   process.env.NODE_ENV === 'production',
+          });
         }
       }
 

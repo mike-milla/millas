@@ -23,6 +23,7 @@ const { AIFilesAPI, AIStoresAPI } = require('./files');
 const { AGENT_DEFINITIONS, BuiltinAgent } = require('./agents');
 const { CostCalculator } = require('./pricing');
 const { WebSearch, WebFetch, FileSearch } = require('./provider_tools');
+const { PromptGuard } = require('./PromptGuard');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PendingRequest — fluent builder for a single text AI call
@@ -53,6 +54,7 @@ class PendingRequest {
     this._tokenBudget    = null;
     this._onToken        = null;
     this._providerOpts   = {};
+    this._guardPrompts   = false;   // Phase 4: prompt injection protection
   }
 
   // ── Provider / model ───────────────────────────────────────────────────────
@@ -62,6 +64,16 @@ class PendingRequest {
   // ── Messages ───────────────────────────────────────────────────────────────
   system(prompt)       { this._systemPrompt = String(prompt); return this; }
   withMessage(content, role = 'user') { this._messages.push(new AIMessage(role, content)); return this; }
+
+  /**
+   * Enable prompt injection protection for this request.
+   * When enabled:
+   *   - The system prompt gets a boundary instruction prepended
+   *   - User messages are wrapped in <user_input> tags
+   *
+   *   AI.system('You are helpful.').guardPrompts().generate(userInput)
+   */
+  guardPrompts(enabled = true) { this._guardPrompts = enabled; return this; }
 
   async withThread(thread) {
     if (thread._systemPrompt) this._systemPrompt = thread._systemPrompt;
@@ -170,7 +182,26 @@ class PendingRequest {
 
   _buildRequest() {
     const messages = [...this._messages];
-    if (this._systemPrompt) messages.unshift(new AIMessage('system', this._systemPrompt));
+
+    // ── Phase 4: prompt injection protection ──────────────────────────────────
+    let systemPrompt = this._systemPrompt;
+    if (this._guardPrompts && systemPrompt) {
+      systemPrompt = PromptGuard.systemBoundary(systemPrompt);
+    }
+
+    if (systemPrompt) messages.unshift(new AIMessage('system', systemPrompt));
+
+    // If guardPrompts is enabled, wrap the last user message in boundary tags
+    if (this._guardPrompts) {
+      const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+      if (lastUserIdx !== -1) {
+        const lastUser = messages[lastUserIdx];
+        if (typeof lastUser.content === 'string' &&
+            !lastUser.content.startsWith('<user_input>')) {
+          messages[lastUserIdx] = new AIMessage('user', PromptGuard.wrap(lastUser.content));
+        }
+      }
+    }
 
     if (this._schema) {
       const schemaHint = `\n\nYou must respond with valid JSON matching this schema:\n${JSON.stringify(this._schema.toJSONSchema(), null, 2)}\n\nRespond ONLY with JSON. No explanation, no markdown fences.`;
@@ -368,6 +399,10 @@ class AIManager {
   use(fn)               { return new PendingRequest(this).use(fn); }
   onToken(fn)           { return new PendingRequest(this).onToken(fn); }
   providerOptions(opts) { return new PendingRequest(this).providerOptions(opts); }
+  guardPrompts(enabled) { return new PendingRequest(this).guardPrompts(enabled); }
+
+  /** Expose PromptGuard utilities directly on the AI facade */
+  get PromptGuard()     { return PromptGuard; }
 
   /** Simplest text call. */
   text(prompt)    { return new PendingRequest(this).generate(prompt); }
@@ -881,22 +916,38 @@ ${text}`,
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
+// Reads ai: config from config/app.js if present, falls back to process.env.
 
-const defaultAI = new AIManager({
-  default: process.env.AI_PROVIDER || 'anthropic',
-  providers: {
-    anthropic:  { apiKey: process.env.ANTHROPIC_API_KEY,  model: process.env.ANTHROPIC_MODEL },
-    openai:     { apiKey: process.env.OPENAI_API_KEY,     model: process.env.OPENAI_MODEL    },
-    gemini:     { apiKey: process.env.GEMINI_API_KEY,     model: process.env.GEMINI_MODEL    },
-    ollama:     { baseUrl: process.env.OLLAMA_BASE_URL,   model: process.env.OLLAMA_MODEL    },
-    groq:       { apiKey: process.env.GROQ_API_KEY,       model: process.env.GROQ_MODEL      },
-    mistral:    { apiKey: process.env.MISTRAL_API_KEY,    model: process.env.MISTRAL_MODEL   },
-    xai:        { apiKey: process.env.XAI_API_KEY,        model: process.env.XAI_MODEL       },
-    deepseek:   { apiKey: process.env.DEEPSEEK_API_KEY,   model: process.env.DEEPSEEK_MODEL  },
-    cohere:     { apiKey: process.env.COHERE_API_KEY,     model: process.env.COHERE_MODEL    },
-    elevenlabs: { apiKey: process.env.ELEVENLABS_API_KEY                                     },
-  },
-});
+function _loadAiConfig() {
+  try {
+    const path      = require('path');
+    const fs        = require('fs');
+    const appConfig = path.join(process.cwd(), 'config', 'app.js');
+    if (fs.existsSync(appConfig)) {
+      const cfg = require(appConfig);
+      if (cfg.ai) return cfg.ai;
+    }
+  } catch { /* fall through to env defaults */ }
+
+  // env fallback — works without config/app.js (e.g. in tests)
+  return {
+    default: process.env.AI_PROVIDER || 'anthropic',
+    providers: {
+      anthropic:  { apiKey: process.env.ANTHROPIC_API_KEY,  model: process.env.ANTHROPIC_MODEL },
+      openai:     { apiKey: process.env.OPENAI_API_KEY,     model: process.env.OPENAI_MODEL    },
+      gemini:     { apiKey: process.env.GEMINI_API_KEY,     model: process.env.GEMINI_MODEL    },
+      ollama:     { baseUrl: process.env.OLLAMA_BASE_URL,   model: process.env.OLLAMA_MODEL    },
+      groq:       { apiKey: process.env.GROQ_API_KEY,       model: process.env.GROQ_MODEL      },
+      mistral:    { apiKey: process.env.MISTRAL_API_KEY,    model: process.env.MISTRAL_MODEL   },
+      xai:        { apiKey: process.env.XAI_API_KEY,        model: process.env.XAI_MODEL       },
+      deepseek:   { apiKey: process.env.DEEPSEEK_API_KEY,   model: process.env.DEEPSEEK_MODEL  },
+      cohere:     { apiKey: process.env.COHERE_API_KEY,     model: process.env.COHERE_MODEL    },
+      elevenlabs: { apiKey: process.env.ELEVENLABS_API_KEY                                     },
+    },
+  };
+}
+
+const defaultAI = new AIManager(_loadAiConfig());
 
 module.exports             = defaultAI;
 module.exports.AIManager   = AIManager;

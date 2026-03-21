@@ -1,6 +1,7 @@
 'use strict';
 
 const { LEVEL_TAGS, LEVEL_COLOURS, RESET, BOLD } = require('../levels');
+const { LogRedactor } = require('../LogRedactor');
 
 const SEP = '  ';
 const TAG_WIDTH = 18;
@@ -72,7 +73,8 @@ class PrettyFormatter {
     for (const l of String(message).split('\n')) logicalLines.push({ text: l, dim: false });
 
     if (context != null) {
-      const ctx = typeof context === 'object' ? JSON.stringify(context) : String(context);
+      const safe = this.redact !== false ? LogRedactor.redact(context) : context;
+      const ctx  = typeof safe === 'object' ? JSON.stringify(safe) : String(safe);
       logicalLines.push({ text: ctx, dim: true });
     }
 

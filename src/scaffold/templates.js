@@ -28,6 +28,7 @@ function getProjectFiles(projectName) {
 APP_ENV=development
 APP_PORT=3000
 APP_KEY=
+APP_URL=http://localhost:3000
 
 DB_CONNECTION=sqlite
 DB_HOST=127.0.0.1
@@ -151,6 +152,7 @@ module.exports = {
   env: process.env.APP_ENV || 'development',
   port: parseInt(process.env.APP_PORT, 10) || 3000,
   key: process.env.APP_KEY || '',
+  url: process.env.APP_URL || 'http://localhost:3000',
   debug: process.env.APP_ENV !== 'production',
   timezone: 'UTC',
   locale:   'en',

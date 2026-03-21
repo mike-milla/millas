@@ -50,11 +50,19 @@ class PendingFile {
 
     const fs   = require('fs');
     const path = require('path');
+    const { resolveStoragePath } = require('../http/SafeFilePath');
     let   buf, filename, mimeType;
 
     if (this._source.type === 'path') {
-      buf      = fs.readFileSync(this._source.value);
-      filename = this._source.filename || path.basename(this._source.value);
+      // Guard: resolve within storage root to prevent path traversal.
+      // If the path is already absolute and within an allowed directory,
+      // resolveStoragePath returns it unchanged. If it escapes, it throws.
+      const safePath = resolveStoragePath(
+        this._source.value,
+        require('../http/SafeFilePath').SafeFilePath.getStorageRoot()
+      );
+      buf      = fs.readFileSync(safePath);
+      filename = this._source.filename || path.basename(safePath);
       mimeType = this._source.mimeType || _mimeFromExt(path.extname(filename));
     } else if (this._source.type === 'storage') {
       const storage = this._manager._storage;

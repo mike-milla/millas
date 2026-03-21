@@ -7,16 +7,39 @@ const { jsonify }    = require('../http/helpers');
 /**
  * ThrottleMiddleware
  *
- * Simple in-memory rate limiter.
- * Uses the Millas middleware signature: handle(req, next).
+ * Per-IP (or per-user) rate limiter registered as the 'throttle' middleware alias.
+ * Used via the route middleware system — developers never import this directly.
+ *
+ * Usage in routes:
+ *   Route.middleware('throttle:5,10').group(() => {    // 5 req per 10 min
+ *     Route.post('/login', AuthController, 'login');
+ *   });
+ *
+ *   Route.post('/login', AuthController, 'login')     // same, single route
+ *     — add 'throttle:5,10' to route middleware array
+ *
+ * Format: 'throttle:<max>,<minutes>'
+ *   throttle:60,1   — 60 requests per minute
+ *   throttle:5,10   — 5 requests per 10 minutes
+ *   throttle:100,15 — 100 requests per 15 minutes
  */
 class ThrottleMiddleware extends Middleware {
   constructor(options = {}) {
     super();
     this.max    = options.max    || 60;
-    this.window = options.window || 60;
+    this.window = options.window || 60;   // seconds
     this.keyBy  = options.keyBy  || ((req) => req.ip || 'anonymous');
     this._store = new Map();
+  }
+
+  /**
+   * Factory used by MiddlewareRegistry when parsing 'throttle:max,minutes'.
+   * @param {string[]} params  — ['5', '10'] from 'throttle:5,10'
+   */
+  static fromParams(params) {
+    const max     = parseInt(params[0], 10) || 60;
+    const minutes = parseInt(params[1], 10) || 1;
+    return new ThrottleMiddleware({ max, window: minutes * 60 });
   }
 
   async handle(req, next) {

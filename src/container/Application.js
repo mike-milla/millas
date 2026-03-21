@@ -319,7 +319,7 @@ class Application {
 
 
         this._mwRegistry.register('cors', new CorsMiddleware());
-        this._mwRegistry.register('throttle', new ThrottleMiddleware({max: 60, window: 60}));
+        this._mwRegistry.register('throttle', ThrottleMiddleware);
         this._mwRegistry.register('log', new LogMiddleware());
         this._mwRegistry.register('auth', AuthMiddleware);
     }

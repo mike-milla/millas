@@ -27,15 +27,40 @@ class MiddlewareRegistry {
 
   /**
    * Resolve a single alias to an Express-compatible function.
+   * Supports parameterised aliases: 'throttle:60,1' → 60 req per 1 minute.
+   *
    * @param {string|Function} aliasOrFn
    * @returns {Function}
    */
   resolve(aliasOrFn) {
     if (typeof aliasOrFn === 'function') return aliasOrFn;
 
-    const Handler = this._map[aliasOrFn];
+    // Parse parameterised alias: 'throttle:60,1' → alias='throttle', params=['60','1']
+    let alias  = aliasOrFn;
+    let params = [];
+    if (typeof aliasOrFn === 'string' && aliasOrFn.includes(':')) {
+      const colonIdx = aliasOrFn.indexOf(':');
+      alias  = aliasOrFn.slice(0, colonIdx);
+      params = aliasOrFn.slice(colonIdx + 1).split(',').map(s => s.trim());
+    }
+
+    const Handler = this._map[alias];
     if (!Handler) {
       throw new Error(`Middleware "${aliasOrFn}" is not registered.`);
+    }
+
+    // If params provided, instantiate the class with them via fromParams() or constructor
+    if (params.length > 0) {
+      if (typeof Handler === 'function' && Handler.prototype &&
+          typeof Handler.prototype.handle === 'function') {
+        const instance = typeof Handler.fromParams === 'function'
+          ? Handler.fromParams(params)
+          : new Handler(...params);
+        return (req, res, next) => {
+          const result = instance.handle(req, res, next);
+          if (result && typeof result.catch === 'function') result.catch(next);
+        };
+      }
     }
 
     // Pre-instantiated object with handle() method (e.g. new ThrottleMiddleware())

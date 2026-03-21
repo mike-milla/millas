@@ -1,75 +1,52 @@
 {
   "name": "millas",
-  "version": "0.2.12-beta-2",
-  "description": "A modern batteries-included backend framework for Node.js — built on Express, inspired by Laravel, Django, and FastAPI",
+  "version": "0.2.12-beta-1",
+  "description": "A modern batteries-included Node.js framework",
   "main": "src/index.js",
-  "exports": {
-    ".": "./src/index.js",
-    "./core/*": "./src/core/*.js",
-    "./middleware/*": "./src/middleware/*.js",
-    "./facades/*": "./src/facades/*.js"
-  },
   "bin": {
     "millas": "./bin/millas.js"
   },
-  "scripts": {
-    "test": "echo \"Run phase-specific tests in tests/\""
-  },
-  "keywords": [
-    "framework",
-    "express",
-    "orm",
-    "cli",
-    "auth",
-    "queue",
-    "cache",
-    "admin",
-    "mail",
-    "events",
-    "laravel",
-    "django",
-    "fastapi",
-    "millas"
-  ],
-  "author": "Millas Framework",
-  "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
   },
+  "scripts": {
+    "start": "node bin/millas.js serve",
+    "test": "node --test",
+    "audit:check": "npm audit --audit-level=high",
+    "audit:fix": "npm audit fix",
+    "security:check": "npm run audit:check"
+  },
   "dependencies": {
-    "bcryptjs": "3.0.2",
-    "chalk": "4.1.2",
-    "chokidar": "^3.6.0",
-    "commander": "^11.0.0",
-    "fs-extra": "^11.0.0",
-    "inquirer": "8.2.6",
-    "jsonwebtoken": "^9.0.3",
-    "knex": "^3.1.0",
-    "nodemailer": "^6.9.0",
-    "nunjucks": "^3.2.4",
-    "ora": "5.4.1",
-    "sqlite3": "^5.1.7"
+    "bcryptjs": "2.4.3",
+    "chalk": "5.3.0",
+    "commander": "11.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "3.0.3"
   },
   "peerDependencies": {
-    "express": "^4.18.0"
+    "express": ">=4.18.0"
   },
   "peerDependenciesMeta": {
     "express": {
       "optional": false
     }
   },
-  "files": [
-    "bin/",
-    "src/",
-    "README.md",
-    "LICENSE"
+  "keywords": [
+    "framework",
+    "nodejs",
+    "web",
+    "millas"
   ],
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/millas-framework/millas"
+    "url": "https://github.com/millas/millas"
   },
-  "homepage": "https://millas.dev",
-  "bugs": {
-    "url": "https://github.com/millas-framework/millas/issues"
-  }
+  "files": [
+    "bin/",
+    "config/",
+    "src/",
+    "README.md"
+  ]
 }
