@@ -16,6 +16,8 @@ require('./commands/make')(program);
 require('./commands/migrate')(program);
 require('./commands/route')(program);
 require('./commands/queue')(program);
+require('./commands/createsuperuser')(program);
+require('./commands/lang')(program);
 
 // Unknown command handler
 program.on('command:*', ([cmd]) => {

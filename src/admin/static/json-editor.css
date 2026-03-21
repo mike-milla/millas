@@ -1,0 +1,649 @@
+
+/* ═══════════════════════════════════════════════════════════════
+   JSON EDITOR
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Inline trigger (form field) ── */
+.je-trigger {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--surface);
+  cursor: pointer;
+  min-height: 38px;
+  transition: border-color .12s, box-shadow .12s;
+}
+.je-trigger:hover  { border-color: #c4c9d4; }
+.je-trigger:focus  { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.je-trigger.error  { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-bg); }
+
+.je-preview-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+}
+.je-preview-placeholder { font-size: 12.5px; color: var(--text-xmuted); font-style: italic; }
+.je-preview-error       { color: var(--danger); }
+
+.je-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 12px;
+  max-width: 180px;
+  overflow: hidden;
+}
+.je-chip-key  { color: var(--text-soft); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.je-chip-sep  { color: var(--text-xmuted); flex-shrink: 0; }
+.je-chip-val  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'DM Mono', monospace; font-size: 11px; }
+.je-chip-more { font-size: 11.5px; color: var(--text-muted); padding: 1px 5px; }
+
+.je-open-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all .1s;
+  white-space: nowrap;
+}
+.je-open-btn:hover { background: var(--surface2); color: var(--primary); border-color: var(--primary); }
+
+/* ── Dialog content ── */
+.je-modal .modal-body { padding: 0; }
+
+.je-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-soft);
+  gap: 10px;
+  flex-shrink: 0;
+}
+.je-toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.je-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* View tabs */
+.je-view-tabs {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.je-view-tab {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: inherit;
+  transition: background .1s, color .1s;
+}
+.je-view-tab:not(:last-child) { border-right: 1px solid var(--border); }
+.je-view-tab:hover  { background: var(--surface2); color: var(--text); }
+.je-view-tab.active { background: var(--primary-soft); color: var(--primary); }
+
+.je-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all .1s;
+  font-family: inherit;
+}
+.je-btn-icon:hover { background: var(--surface2); color: var(--text); }
+
+/* ── Pretty view (tree) ── */
+.je-pretty-view {
+  padding: 10px 12px;
+  min-height: 200px;
+  max-height: 450px;
+  overflow-y: auto;
+}
+
+.je-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  min-height: 32px;
+}
+.je-row:hover { background: var(--surface2); }
+
+.je-indent  { display: inline-block; flex-shrink: 0; }
+
+.je-toggle  {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-xmuted);
+  border-radius: 3px;
+}
+.je-toggle-active { cursor: pointer; color: var(--text-muted); }
+.je-toggle-active:hover { background: var(--surface3); color: var(--text); }
+
+.je-key-input {
+  width: 120px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12.5px;
+  font-family: 'DM Mono', monospace;
+  color: var(--text);
+  font-weight: 500;
+  background: none;
+  outline: none;
+  transition: border-color .1s, background .1s;
+}
+.je-key-input:hover  { border-color: var(--border); background: var(--surface); }
+.je-key-input:focus  { border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 2px var(--primary-soft); }
+
+.je-colon {
+  color: var(--text-xmuted);
+  font-size: 13px;
+  flex-shrink: 0;
+  width: 8px;
+  text-align: center;
+}
+.je-colon::before { content: ':'; }
+
+.je-type-select {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  background: none;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+  transition: border-color .1s;
+}
+.je-type-select:hover { border-color: var(--border); background: var(--surface); }
+.je-type-select:focus { border-color: var(--primary); }
+
+.je-value-cell { flex: 1; min-width: 0; display: flex; align-items: center; }
+
+.je-val-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12.5px;
+  font-family: 'DM Mono', monospace;
+  color: var(--success, #16a34a);
+  background: none;
+  outline: none;
+  transition: border-color .1s, background .1s;
+}
+.je-val-input:hover { border-color: var(--border); background: var(--surface); }
+.je-val-input:focus { border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 2px var(--primary-soft); }
+
+.je-val-select {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12.5px;
+  font-family: 'DM Mono', monospace;
+  color: var(--warning, #d97706);
+  background: none;
+  cursor: pointer;
+  outline: none;
+}
+.je-val-select:hover { border-color: var(--border); background: var(--surface); }
+
+.je-null-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12.5px;
+  color: var(--text-xmuted);
+  font-style: italic;
+  padding: 3px 6px;
+}
+
+.je-nested-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--primary-dim);
+  border-radius: 99px;
+  padding: 1px 8px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.je-nested-badge:hover { background: var(--primary-dim); }
+
+.je-del-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  color: var(--text-xmuted);
+  opacity: 0;
+  transition: opacity .1s, background .1s, color .1s;
+}
+.je-row:hover .je-del-btn { opacity: 1; }
+.je-del-btn:hover { background: var(--danger-bg); color: var(--danger); }
+
+.je-children {
+  border-left: 2px solid var(--border);
+  margin-left: 20px;
+  padding-left: 4px;
+}
+
+.je-more-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin: 4px 4px;
+  transition: background .1s, color .1s;
+}
+.je-more-chip:hover { background: var(--surface3); color: var(--text); }
+
+.je-add-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+  transition: background .1s, color .1s;
+  margin-top: 2px;
+}
+.je-add-row-btn:hover { background: var(--surface2); color: var(--primary); }
+
+/* ── Raw view ── */
+.je-raw-view { padding: 12px; }
+
+.je-raw-ta {
+  width: 100%;
+  min-height: 300px;
+  max-height: 420px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--surface2);
+  outline: none;
+  tab-size: 2;
+}
+.je-raw-ta:focus { border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+.je-raw-hint       { font-size: 11.5px; color: var(--success); margin-top: 6px; min-height: 18px; }
+.je-raw-hint-error { color: var(--danger); }
+
+/* ── Footer ── */
+.je-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.je-count { font-size: 12px; color: var(--text-muted); }
+
+
+/* ── Root type toggle (toolbar) ── */
+.je-root-type-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.je-root-type-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+}
+.je-root-type-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: 'DM Mono', monospace;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all .12s;
+}
+.je-root-type-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+.je-root-type-btn.active {
+  background: var(--primary-soft);
+  border-color: var(--primary-dim);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── Array index badge (replaces key input for array items) ── */
+.je-index-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 1px 6px;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-dim);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  font-weight: 600;
+  color: var(--primary);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 3 — Indent guides
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Vertical guide line on each nesting level */
+.je-children {
+  border-left: 2px solid var(--border);
+  margin-left: 10px;
+  padding-left: 6px;
+  position: relative;
+}
+
+/* Subtle connector tick on each row at depth > 0 */
+.je-children > .je-row::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 4 — Type-change warning banner
+   ═══════════════════════════════════════════════════════════════ */
+
+.je-type-warn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  margin: 2px 0 2px 28px;   /* indent to align with row content */
+  background: var(--warning-bg, #fffbeb);
+  border: 1px solid var(--warning-border, #fed7aa);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--warning, #d97706);
+  animation: je-warn-in .15s ease;
+}
+
+@keyframes je-warn-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.je-type-warn-msg {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+.je-type-warn-msg strong { color: var(--text); }
+
+.je-type-warn-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.je-type-warn-btn {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all .1s;
+  white-space: nowrap;
+}
+
+.je-type-warn-drop {
+  background: var(--danger-bg, #fef2f2);
+  color: var(--danger, #dc2626);
+  border-color: var(--danger-border, #fecaca);
+}
+.je-type-warn-drop:hover {
+  background: var(--danger, #dc2626);
+  color: #fff;
+}
+
+.je-type-warn-ser {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary-dim);
+}
+.je-type-warn-ser:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.je-type-warn-cancel {
+  background: none;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.je-type-warn-cancel:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 5 — Drag to Reorder
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Drag handle */
+.je-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--text-xmuted);
+  opacity: 0;
+  transition: opacity .1s, color .1s;
+  margin-right: 2px;
+}
+.je-row:hover .je-drag-handle { opacity: 1; }
+.je-drag-handle:hover { color: var(--text-muted); }
+.je-drag-handle:active { cursor: grabbing; }
+
+/* Row while being dragged */
+.je-row.je-dragging {
+  opacity: .35;
+  pointer-events: none;
+}
+
+/* Drop indicator line */
+.je-drop-indicator {
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px;
+  margin: 1px 4px;
+  pointer-events: none;
+  position: relative;
+}
+/* Dot on the left end of the indicator */
+.je-drop-indicator::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 6 — Undo / Redo toolbar buttons
+   ═══════════════════════════════════════════════════════════════ */
+
+.je-undo-wrap {
+  display: flex;
+  gap: 2px;
+}
+
+/* Disabled state for undo/redo buttons */
+.je-btn-icon:disabled {
+  opacity: .3;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+/* ═══════════════════════════════════════════════════════════════
+   Phase 7 — Polish
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Keyboard focus ring on rows ── */
+.je-row:focus {
+  outline: none;
+  background: var(--primary-soft);
+  border-radius: 4px;
+}
+.je-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary-dim);
+}
+
+/* ── Empty state ── */
+.je-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.je-empty-state p {
+  margin: 0;
+  color: var(--text-muted);
+}
+.je-empty-add-btn {
+  padding: 5px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-dim);
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  cursor: pointer;
+  transition: background .1s;
+}
+.je-empty-add-btn:hover {
+  background: var(--primary-dim);
+}
+
+/* ── Render error ── */
+.je-render-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--danger);
+  font-size: 13px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  margin: 12px;
+}
+
+/* ── Duplicate key highlight ── */
+.je-key-input.je-dup-key {
+  border-color: var(--danger) !important;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.je-key-input.je-dup-key:focus {
+  box-shadow: 0 0 0 2px var(--danger-bg);
+}

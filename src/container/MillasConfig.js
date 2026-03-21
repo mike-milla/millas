@@ -25,6 +25,11 @@ const AppInitializer = require("./AppInitializer");
 class MillasConfig {
     constructor() {
         this._config = {
+            // Absolute path to the project root — passed to all providers
+            // so they never need to call process.cwd() at runtime.
+            // Set via .configure(__dirname) in bootstrap/app.js.
+            basePath: null,
+
             // Service providers
             providers: [],
 
@@ -35,13 +40,14 @@ class MillasConfig {
             middleware: [],
 
             // Core service toggles
+            logging:  true,
             database: true,
-            cache: true,
-            storage: true,
-            mail: true,
-            queue: true,
-            events: true,
-            logging: true,
+            auth:     true,   // AuthServiceProvider — always on by default
+            cache:    true,
+            storage:  true,
+            mail:     true,
+            queue:    true,
+            events:   true,
 
             // Admin panel — null means disabled, {} or options object means enabled
             admin: null,
@@ -56,6 +62,22 @@ class MillasConfig {
     }
 
     // ── Chainable config methods ───────────────────────────────────────────────
+
+    /**
+     * Set the application base path. Must be the first call.
+     * Pass __dirname from bootstrap/app.js — Laravel style.
+     *
+     *   Millas.configure(__dirname)
+     *
+     * All providers use this to locate config files, models, and routes
+     * without relying on process.cwd() at runtime.
+     *
+     * @param {string} basePath — absolute path to the project root
+     */
+    configure(basePath) {
+        this._config.basePath = basePath;
+        return this;
+    }
 
     /**
      * Register application service providers.
@@ -93,8 +115,15 @@ class MillasConfig {
     /**
      * Enable the admin panel.
      *
+     * AuthServiceProvider and AdminServiceProvider are registered
+     * automatically — no need to add them to .providers([]).
+     *
      *   .withAdmin()
      *   .withAdmin({ prefix: '/cms', title: 'My CMS' })
+     *
+     * First-time setup:
+     *   millas migrate          # creates users + admin_log + sessions tables
+     *   millas createsuperuser  # creates your first admin user
      */
     withAdmin(options = {}) {
         this._config.admin = options;

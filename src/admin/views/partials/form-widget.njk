@@ -1,0 +1,297 @@
+{#
+  partials/form-widget.njk
+  All widget HTML — one block per field type.
+  Expects in scope: field, val, hasError, isEdit
+#}
+
+{# ── Select ── #}
+{% if field.type == 'select' and field.options %}
+<select id="field-{{ field.name }}" name="{{ field.name }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  {% if not field.nullable %}data-required="true"{% endif %}>
+  <option value="">— Select —</option>
+  {% for opt in field.options %}
+  {% set optVal   = opt.value if opt.value is defined else opt %}
+  {% set optLabel = opt.label if opt.label is defined else opt %}
+  <option value="{{ optVal }}" {% if val == optVal %}selected{% endif %}>{{ optLabel }}</option>
+  {% endfor %}
+</select>
+
+{# ── FK — async paginated dropdown ── #}
+{% elif field.type == 'fk' %}
+<div class="fk-widget" id="fkw-{{ field.name }}"
+  data-name="{{ field.name }}"
+  data-resource="{{ field.fkResource }}"
+  data-nullable="{{ 'true' if field.nullable else 'false' }}"
+  data-required="{{ 'true' if not field.nullable else 'false' }}"
+  data-current-id="{{ val }}"
+  data-current-label=""
+  data-fk-field="{{ field.name }}">
+  <input type="hidden"
+    id="field-{{ field.name }}"
+    name="{{ field.name }}"
+    value="{{ val }}"
+    {% if not field.nullable %}data-required="true"{% endif %}>
+  <button type="button"
+    class="fk-trigger form-control{% if hasError %} error{% endif %}"
+    id="fktrig-{{ field.name }}"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    aria-controls="fkpanel-{{ field.name }}">
+    <span class="fk-trigger-label">
+      {% if val %}
+        <span class="fk-id-chip">#{{ val }}</span>
+        <span class="fk-loading-label">Loading…</span>
+      {% else %}
+        <span class="fk-placeholder">— Select —</span>
+      {% endif %}
+    </span>
+    <svg class="fk-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="fk-panel" id="fkpanel-{{ field.name }}" role="listbox" style="display:none">
+    <div class="fk-search-wrap">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" class="fk-search" id="fksearch-{{ field.name }}"
+        placeholder="Search…" autocomplete="off" spellcheck="false">
+      <button type="button" class="fk-search-clear" hidden aria-label="Clear search">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="fk-list" id="fklist-{{ field.name }}" role="listbox">
+      <div class="fk-spinner-row">
+        <svg class="fk-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+        Loading…
+      </div>
+    </div>
+    <div class="fk-footer" id="fkfoot-{{ field.name }}" hidden>
+      <span class="fk-count" id="fkcount-{{ field.name }}"></span>
+      <div class="fk-pages">
+        <button type="button" class="fk-page-btn" id="fkprev-{{ field.name }}" aria-label="Previous page" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="fk-page-info" id="fkpageinfo-{{ field.name }}"></span>
+        <button type="button" class="fk-page-btn" id="fknext-{{ field.name }}" aria-label="Next page">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </div>
+    {% if field.nullable %}
+    <div class="fk-clear-row">
+      <button type="button" class="fk-clear-btn" id="fkclear-{{ field.name }}">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Clear selection
+      </button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── M2M — dual list ── #}
+{% elif field.type == 'm2m' %}
+<div class="m2m-widget" id="m2m-{{ field.name }}">
+  <div style="display:flex;gap:8px;align-items:flex-start">
+    <div style="flex:1">
+      <div class="form-label" style="font-size:11px;color:var(--text-soft)">Available</div>
+      <select class="form-control" size="6" id="m2m-available-{{ field.name }}" style="width:100%" multiple></select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;padding-top:24px">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="m2mMove('{{ field.name }}','available','chosen')">→</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="m2mMove('{{ field.name }}','chosen','available')">←</button>
+    </div>
+    <div style="flex:1">
+      <div class="form-label" style="font-size:11px;color:var(--text-soft)">Chosen</div>
+      <select class="form-control" name="{{ field.name }}[]" size="6"
+        id="m2m-chosen-{{ field.name }}" style="width:100%" multiple>
+        {% if val %}{% for v in val %}<option value="{{ v }}" selected>{{ v }}</option>{% endfor %}{% endif %}
+      </select>
+    </div>
+  </div>
+</div>
+
+{# ── Boolean — toggle switch ── #}
+{% elif field.type == 'checkbox' %}
+<div class="toggle-field">
+  <label class="toggle-wrap" for="field-{{ field.name }}">
+    <input type="checkbox"
+      id="field-{{ field.name }}"
+      name="{{ field.name }}"
+      class="toggle-input"
+      value="1"{{ ' checked' if val else '' }}>
+    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    <span class="toggle-label">{{ field.label }}</span>
+  </label>
+  {% if field.help %}
+  <div class="form-help" style="margin-top:4px;margin-left:52px">{{ field.help }}</div>
+  {% endif %}
+</div>
+
+{# ── Textarea ── #}
+{% elif field.type == 'textarea' %}
+<textarea id="field-{{ field.name }}" name="{{ field.name }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or '' }}"
+  {% if not field.nullable %}data-required="true"{% endif %}
+  rows="4">{{ val }}</textarea>
+
+{# ── JSON — dialog editor ── #}
+{% elif field.type == 'json' %}
+{% include "partials/json-editor.njk" %}
+
+{# ── Richtext ── #}
+{% elif field.type == 'richtext' %}
+<div class="richtext-wrap">
+  <div class="richtext-toolbar">
+    <button type="button" onclick="rtCmd('bold')" title="Bold"><b>B</b></button>
+    <button type="button" onclick="rtCmd('italic')" title="Italic"><i>I</i></button>
+    <button type="button" onclick="rtCmd('underline')" title="Underline"><u>U</u></button>
+    <span class="rt-sep"></span>
+    <button type="button" onclick="rtCmd('insertUnorderedList')" title="Bullet list">≡</button>
+    <button type="button" onclick="rtCmd('insertOrderedList')" title="Numbered list">1.</button>
+    <span class="rt-sep"></span>
+    <button type="button" onclick="rtLink()" title="Link">🔗</button>
+  </div>
+  <div id="rt-{{ field.name }}" class="richtext-editor form-control{% if hasError %} error{% endif %}"
+    contenteditable="true"
+    style="min-height:120px;height:auto">{{ val | safe }}</div>
+  <input type="hidden" id="field-{{ field.name }}" name="{{ field.name }}" value="{{ val }}">
+</div>
+
+{# ── Password ── #}
+{% elif field.type == 'password' %}
+<div style="position:relative">
+  <input type="password" id="field-{{ field.name }}" name="{{ field.name }}"
+    class="form-control{% if hasError %} error{% endif %}"
+    placeholder="{{ 'Leave blank to keep current' if isEdit else '' }}"
+    {% if not field.nullable and not isEdit %}data-required="true"{% endif %}
+    style="padding-right:40px">
+  <button type="button" class="pw-toggle"
+    onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+    </svg>
+  </button>
+</div>
+
+{# ── Email ── #}
+{% elif field.type == 'email' %}
+<input type="email" id="field-{{ field.name }}" name="{{ field.name }}"
+  value="{{ val }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or 'name@example.com' }}"
+  data-validate="email"
+  {% if not field.nullable %}data-required="true"{% endif %}>
+
+{# ── URL ── #}
+{% elif field.type == 'url' %}
+<input type="url" id="field-{{ field.name }}" name="{{ field.name }}"
+  value="{{ val }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or 'https://' }}"
+  data-validate="url"
+  {% if not field.nullable %}data-required="true"{% endif %}>
+
+{# ── Phone ── #}
+{% elif field.type == 'phone' %}
+<input type="tel" id="field-{{ field.name }}" name="{{ field.name }}"
+  value="{{ val }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or '+1 555 000 0000' }}"
+  {% if not field.nullable %}data-required="true"{% endif %}>
+
+{# ── Color ── #}
+{% elif field.type == 'color' %}
+<div class="flex items-center gap-2">
+  <input type="color" id="field-{{ field.name }}-picker"
+    value="{{ val or '#000000' }}"
+    style="width:40px;height:36px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;padding:2px"
+    oninput="document.getElementById('field-{{ field.name }}').value=this.value">
+  <input type="text" id="field-{{ field.name }}" name="{{ field.name }}"
+    value="{{ val }}"
+    class="form-control{% if hasError %} error{% endif %}"
+    placeholder="#000000"
+    style="width:120px"
+    oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))document.getElementById('field-{{ field.name }}-picker').value=this.value">
+</div>
+
+{# ── Number ── #}
+{% elif field.type == 'number' %}
+<input type="number" id="field-{{ field.name }}" name="{{ field.name }}"
+  value="{{ val }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or '0' }}"
+  {% if field.min is not none %}min="{{ field.min }}" data-min="{{ field.min }}"{% endif %}
+  {% if field.max is not none %}max="{{ field.max }}" data-max="{{ field.max }}"{% endif %}
+  {% if not field.nullable %}data-required="true"{% endif %}>
+
+{# ── Date — custom picker ── #}
+{% elif field.type == 'date' %}
+<div class="dp-wrap">
+  {# Hidden input carries the real ISO value on form submit #}
+  <input type="hidden" id="field-{{ field.name }}" name="{{ field.name }}"
+    value="{{ val }}"
+    {% if not field.nullable %}data-required="true"{% endif %}>
+  {# Visible trigger — readonly, opens the calendar via DatePicker #}
+  <input type="text"
+    class="form-control dp-trigger{% if hasError %} error{% endif %}"
+    id="dpt-{{ field.name }}"
+    placeholder="Select date…"
+    autocomplete="off"
+    data-target="field-{{ field.name }}"
+    data-mode="date">
+  <span class="dp-icon">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+  </span>
+</div>
+
+{# ── Datetime — custom picker with time ── #}
+{% elif field.type == 'datetime' or field.type == 'datetime-local' %}
+<div class="dp-wrap">
+  <input type="hidden" id="field-{{ field.name }}" name="{{ field.name }}"
+    value="{{ val }}"
+    {% if not field.nullable %}data-required="true"{% endif %}>
+  <input type="text"
+    class="form-control dp-trigger{% if hasError %} error{% endif %}"
+    id="dpt-{{ field.name }}"
+    placeholder="Select date and time…"
+    autocomplete="off"
+    data-target="field-{{ field.name }}"
+    data-mode="datetime">
+  <span class="dp-icon">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+  </span>
+</div>
+
+{# ── Badge — display only, no input ── #}
+{% elif field.type == 'badge' %}
+{% set _bc = field.colors[val] if (field.colors and val and field.colors[val]) else 'gray' %}
+<div class="readonly-value">
+  {% if val %}<span class="badge badge-{{ _bc }}">{{ val }}</span>{% else %}<span class="cell-muted">—</span>{% endif %}
+</div>
+
+{# ── Image — display URL as text + preview ── #}
+{% elif field.type == 'image' %}
+<div>
+  {% if val %}
+  <img src="{{ val }}" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;margin-bottom:8px" alt="">
+  {% endif %}
+  <input type="text" id="field-{{ field.name }}" name="{{ field.name }}"
+    value="{{ val }}"
+    class="form-control{% if hasError %} error{% endif %}"
+    placeholder="https://example.com/image.jpg"
+    {% if not field.nullable %}data-required="true"{% endif %}>
+</div>
+
+{# ── Default text ── #}
+{% else %}
+<input type="text" id="field-{{ field.name }}" name="{{ field.name }}"
+  value="{{ val }}"
+  class="form-control{% if hasError %} error{% endif %}"
+  placeholder="{{ field.placeholder or '' }}"
+  {% if field.max is not none %}maxlength="{{ field.max }}"{% endif %}
+  {% if not field.nullable %}data-required="true"{% endif %}
+  {% if field.prepopulate %}data-prepopulate="{{ field.prepopulate }}"{% endif %}>
+{% endif %}

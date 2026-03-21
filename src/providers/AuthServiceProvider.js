@@ -22,10 +22,11 @@ class AuthServiceProvider extends ServiceProvider {
   }
 
   async boot(container, app) {
+    const basePath = container.make('basePath') || process.cwd();
     // Load auth config
     let authConfig;
     try {
-      authConfig = require(process.cwd() + '/config/auth');
+      authConfig = require(basePath + '/config/auth');
     } catch {
       authConfig = {
         default: 'jwt',
@@ -33,12 +34,46 @@ class AuthServiceProvider extends ServiceProvider {
       };
     }
 
-    // Load the app's User model if it exists.
-    // Falls back to the built-in AuthUser so Auth always has a model to work with.
+    // ── Resolve the User model ──────────────────────────────────────────────
+    //
+    // Priority order (mirrors Django's AUTH_USER_MODEL pattern):
+    //
+    //   1. config/app.js → auth_user: 'User'
+    //      The model name is looked up in app/models/index.js exports.
+    //      This is the recommended approach — explicit and refactor-safe.
+    //
+    //   2. app/models/User.js (default export or named User export)
+    //      Conventional fallback — works if auth_user is not set and
+    //      the file exists at the default path.
+    //
+    //   3. Built-in AuthUser
+    //      Abstract base class — no table. Used only as a last resort
+    //      so Auth always has a model to work with during early dev.
+    //
     let UserModel;
     try {
-      UserModel = require(process.cwd() + '/app/models/User');
-    } catch {
+      // Step 1: read auth_user from config/app.js
+      let authUserName = null;
+      try {
+        const appConfig = require(basePath + '/config/app');
+        authUserName = appConfig.auth_user || null;
+      } catch { /* config/app.js missing or has no auth_user key */ }
+
+      if (authUserName) {
+        // Resolve by name from app/models/index.js
+        const modelsIndex = require(basePath + '/app/models/index');
+        const resolved    = modelsIndex[authUserName];
+        if (!resolved) {
+          throw new Error(
+            `[AuthServiceProvider] auth_user: '${authUserName}' not found in app/models/index.js.\n` +
+            `  Available exports: ${Object.keys(modelsIndex).join(', ')}`
+          );
+        }
+        UserModel = resolved;
+      }
+    } catch (err) {
+      if (err.message.includes('[AuthServiceProvider]')) throw err; // re-throw config errors
+      // Step 3: fall back to built-in AuthUser (abstract — no table)
       UserModel = require('../auth/AuthUser');
     }
 

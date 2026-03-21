@@ -27,7 +27,7 @@ class MailServiceProvider extends ServiceProvider {
   async boot(container) {
     let mailConfig;
     try {
-      mailConfig = require(process.cwd() + '/config/mail');
+      mailConfig = require((container.make('basePath') || process.cwd()) + '/config/mail');
     } catch {
       mailConfig = {
         default:  process.env.MAIL_DRIVER || 'log',

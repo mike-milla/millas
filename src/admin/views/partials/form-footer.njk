@@ -1,0 +1,28 @@
+{#
+  partials/form-footer.njk
+  Submit buttons, cancel, delete, and timestamps.
+  Expects in scope: isEdit, resource, record, adminPrefix
+#}
+<div class="flex items-center gap-2" style="margin-top:16px;flex-wrap:wrap">
+  <button type="submit" name="_submit" value="save" class="btn btn-primary" id="submit-btn">
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-save"/></svg></span>
+    {{ 'Save Changes' if isEdit else 'Create ' + resource.singular }}
+  </button>
+  <button type="submit" name="_submit" value="continue" class="btn btn-ghost btn-sm">
+    Save and continue editing
+  </button>
+  {% if not isEdit %}
+  <button type="submit" name="_submit" value="add_another" class="btn btn-ghost btn-sm">
+    Save and add another
+  </button>
+  {% endif %}
+  <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost">Cancel</a>
+
+  {% if isEdit and resource.canDelete %}
+  <button type="button" class="btn btn-danger" style="margin-left:auto"
+    onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/delete', '{{ resource.singular }} #{{ record.id }}')">
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+    Delete
+  </button>
+  {% endif %}
+</div>

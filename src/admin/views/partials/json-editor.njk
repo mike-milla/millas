@@ -1,0 +1,37 @@
+{#
+  partials/json-editor.njk
+  Replaces the JSON textarea in the form with a compact trigger + preview.
+  Clicking opens the full Postman-style dialog.
+
+  Expects in scope: field, val, hasError, record
+#}
+{% set _jv = val | dump if (val is not none and val != '') else '{}' %}
+
+<input type="hidden"
+  id="field-{{ field.name }}"
+  name="{{ field.name }}"
+  value="{{ _jv | escape }}"
+  {% if not field.nullable %}data-required="true"{% endif %}>
+
+<div class="je-trigger {% if hasError %}error{% endif %}"
+     id="jet-{{ field.name }}"
+     tabindex="0"
+     role="button"
+     aria-label="Edit {{ field.label }} JSON"
+     data-field="{{ field.name }}"
+     onclick="JsonEditor.open('{{ field.name }}')"
+     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();JsonEditor.open('{{ field.name }}');}">
+
+  <div class="je-preview-wrap" id="jep-{{ field.name }}">
+    <span class="je-preview-placeholder">Click to edit…</span>
+  </div>
+
+  <button type="button" class="je-open-btn" tabindex="-1"
+    onclick="event.stopPropagation();JsonEditor.open('{{ field.name }}')">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>
+    Edit JSON
+  </button>
+</div>

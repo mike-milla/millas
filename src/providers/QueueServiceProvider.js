@@ -29,7 +29,7 @@ class QueueServiceProvider extends ServiceProvider {
   async boot(container) {
     let queueConfig;
     try {
-      queueConfig = require(process.cwd() + '/config/queue');
+      queueConfig = require((container.make('basePath') || process.cwd()) + '/config/queue');
     } catch {
       queueConfig = {
         default: process.env.QUEUE_DRIVER || 'sync',

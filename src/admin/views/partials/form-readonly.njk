@@ -1,0 +1,114 @@
+{#
+  partials/form-readonly.njk
+  Renders a single readonly field as disabled input.
+  Expects in scope: field, record
+#}
+
+<div class="form-group {% if field.span == 'full' or field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full{% elif field.span == 'third' %}w-third{% endif %}">
+  <label class="form-label" for="field-{{ field.name }}">{{ field.label }}</label>
+
+  {# ── Select ── #}
+  {% if field.type == 'select' and field.options %}
+    <select class="form-control" disabled>
+      {% if val %}
+        {% for opt in field.options %}
+          {% set optVal = opt.value if opt.value is defined else opt %}
+          {% set optLabel = opt.label if opt.label is defined else opt %}
+          <option {% if val == optVal %}selected{% endif %}>{{ optLabel }}</option>
+        {% endfor %}
+      {% else %}
+        <option>— Select —</option>
+      {% endif %}
+    </select>
+
+  {# ── Checkbox ── #}
+  {% elif field.type == 'checkbox' %}
+    <div class="toggle-field">
+      <label class="toggle-wrap" style="opacity:0.6;cursor:not-allowed">
+        <input type="checkbox" disabled {{ 'checked' if val else '' }} class="toggle-input">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">{{ field.label }}</span>
+      </label>
+    </div>
+
+  {# ── Badge ── #}
+  {% elif field.type == 'badge' %}
+    {% set _bc = field.colors[val] if (field.colors and val and field.colors[val]) else 'gray' %}
+    <span class="badge badge-{{ _bc if val else 'gray' }}">{{ val if val else 'Not set' }}</span>
+
+  {# ── Textarea ── #}
+  {% elif field.type == 'textarea' %}
+    <textarea class="form-control" disabled readonly rows="4" placeholder="{{ field.placeholder or '' }}">{{ val }}</textarea>
+
+  {# ── JSON ── #}
+  {% elif field.type == 'json' %}
+    <textarea class="form-control" disabled readonly rows="6" style="font-family:monospace;font-size:12px">{{ val | dump if val else '' }}</textarea>
+
+  {# ── Richtext ── #}
+  {% elif field.type == 'richtext' %}
+    <div class="form-control" style="min-height:120px;background:var(--surface-muted);cursor:not-allowed" disabled>{{ val | safe if val else '' }}</div>
+
+  {# ── Date ── #}
+  {% elif field.type == 'date' %}
+    <div class="dp-wrap">
+      <input type="text" class="form-control dp-trigger" value="{{ val }}" placeholder="Select date…" disabled readonly>
+      <span class="dp-icon" style="opacity:0.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </span>
+    </div>
+
+  {# ── Datetime ── #}
+  {% elif field.type == 'datetime' or field.type == 'datetime-local' %}
+    <div class="dp-wrap">
+      <input type="text" class="form-control dp-trigger" value="{{ val }}" placeholder="Select date and time…" disabled readonly>
+      <span class="dp-icon" style="opacity:0.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </span>
+    </div>
+
+  {# ── Email ── #}
+  {% elif field.type == 'email' %}
+    <input type="email" class="form-control" value="{{ val }}" placeholder="{{ field.placeholder or 'name@example.com' }}" disabled readonly>
+
+  {# ── URL ── #}
+  {% elif field.type == 'url' %}
+    <input type="url" class="form-control" value="{{ val }}" placeholder="{{ field.placeholder or 'https://' }}" disabled readonly>
+
+  {# ── Phone ── #}
+  {% elif field.type == 'phone' %}
+    <input type="tel" class="form-control" value="{{ val }}" placeholder="{{ field.placeholder or '+1 555 000 0000' }}" disabled readonly>
+
+  {# ── Color ── #}
+  {% elif field.type == 'color' %}
+    <div class="flex items-center gap-2">
+      <input type="color" value="{{ val or '#000000' }}" disabled style="width:40px;height:36px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:not-allowed;padding:2px;opacity:0.6">
+      <input type="text" class="form-control" value="{{ val }}" placeholder="#000000" style="width:120px" disabled readonly>
+    </div>
+
+  {# ── Number ── #}
+  {% elif field.type == 'number' %}
+    <input type="number" class="form-control" value="{{ val }}" placeholder="{{ field.placeholder or '0' }}" disabled readonly>
+
+  {# ── Password ── #}
+  {% elif field.type == 'password' %}
+    <input type="password" class="form-control" value="{{ '••••••••' if val else '' }}" placeholder="{{ field.placeholder or '' }}" disabled readonly>
+
+  {# ── Image ── #}
+  {% elif field.type == 'image' %}
+    <div>
+      {% if val %}
+      <img src="{{ val }}" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;margin-bottom:8px" alt="">
+      {% endif %}
+      <input type="text" class="form-control" value="{{ val }}" placeholder="https://example.com/image.jpg" disabled readonly>
+    </div>
+
+  {# ── Default text ── #}
+  {% else %}
+    <input type="text" class="form-control" value="{{ val }}" placeholder="{{ field.placeholder or '' }}" disabled readonly>
+
+  {% endif %}
+</div>

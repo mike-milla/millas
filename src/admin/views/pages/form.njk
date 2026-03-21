@@ -1,22 +1,23 @@
 {% extends "layouts/base.njk" %}
 
 {% block title %}{{ 'Edit' if isEdit else 'New' }} {{ resource.singular }}{% endblock %}
+
 {% block topbar_title %}
   <span class="icon icon-16" style="color:var(--text-muted)">
-    <svg viewBox="0 0 24 24"><use href="#ic-{{ 'edit' if isEdit else 'plus' }}"/></svg>
+    <svg viewBox="0 0 24 24"><use href="#ic-{{ 'edit' if isEdit else 'file' }}"/></svg>
   </span>
-  {{ 'Edit' if isEdit else 'New' }} {{ resource.singular }}
+  {{ ('Edit ' + resource.singular) if isEdit else ('New ' + resource.singular) }}
 {% endblock %}
 
 {% block topbar_actions %}
   {% if isEdit and resource.canView %}
   <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}" class="btn btn-ghost btn-sm">
-    <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
     View
   </a>
   {% endif %}
   <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost btn-sm">
-    <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-arrow-left"/></svg></span>
+    <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-arrow-left"/></svg></span>
     Back
   </a>
 {% endblock %}
@@ -34,7 +35,7 @@
 
 <div style="max-width:780px">
 
-  {# ── Build tab list from formFields ── #}
+  {# Build tab list from formFields #}
   {% set tabNames = [] %}
   {% for f in formFields %}
     {% if f.tab and f.tab not in tabNames %}
@@ -44,11 +45,10 @@
   {% set hasTabs = tabNames | length > 0 %}
 
   <form method="POST" action="{{ formAction }}" id="record-form" novalidate>
-    {% if isEdit %}
-    <input type="hidden" name="_method" value="PUT">
-    {% endif %}
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}">
+    {% if isEdit %}<input type="hidden" name="_method" value="PUT">{% endif %}
 
-    {# ── Validation errors summary ── #}
+    {# Validation errors summary #}
     {% if errors | length %}
     <div class="alert alert-error mb-4" id="error-summary">
       <span class="icon icon-16" style="flex-shrink:0"><svg viewBox="0 0 24 24"><use href="#ic-alert-circle"/></svg></span>
@@ -56,73 +56,56 @@
         <div class="fw-600" style="margin-bottom:4px">Please fix the following errors:</div>
         <ul style="padding-left:14px;list-style:disc">
           {% for field, msgs in errors %}
-          <li style="font-size:12.5px;margin-top:2px">
-            {{ msgs[0] if msgs is iterable else msgs }}
-          </li>
+          <li style="font-size:12.5px;margin-top:2px">{{ msgs[0] if msgs is iterable else msgs }}</li>
           {% endfor %}
         </ul>
       </div>
     </div>
     {% endif %}
 
-    {# ══════════════════════════════════════
-       TABBED LAYOUT
-       ══════════════════════════════════════ #}
     {% if hasTabs %}
-
-    <div class="tab-nav mb-0" style="margin-bottom:0;border-radius:var(--radius-lg) var(--radius-lg) 0 0;background:var(--surface);border:1px solid var(--border);border-bottom:none;padding:0 4px">
-      {# First tab is always "General" for ungrouped fields #}
+    {# Tab nav #}
+    <div class="tab-nav mb-0" style="border-radius:var(--radius-lg) var(--radius-lg) 0 0;background:var(--surface);border:1px solid var(--border);border-bottom:none;padding:0 4px">
       {% set hasUngrouped = false %}
       {% for f in formFields %}{% if not f.tab %}{% set hasUngrouped = true %}{% endif %}{% endfor %}
-
       {% if hasUngrouped %}
-      <button type="button" class="tab-btn active" data-tab="__general__" onclick="switchFormTab('__general__', this)">
-        General
-      </button>
+      <button type="button" class="tab-btn active" data-tab="__general__" onclick="switchFormTab('__general__', this)">General</button>
       {% endif %}
       {% for name in tabNames %}
-      <button type="button" class="tab-btn {% if not hasUngrouped and loop.first %}active{% endif %}" data-tab="{{ name }}" onclick="switchFormTab('{{ name }}', this)">
-        {{ name }}
-      </button>
+      <button type="button" class="tab-btn {% if not hasUngrouped and loop.first %}active{% endif %}" data-tab="{{ name }}" onclick="switchFormTab('{{ name }}', this)">{{ name }}</button>
       {% endfor %}
     </div>
 
-    {# General (ungrouped) fields #}
+    {# General (ungrouped) tab panel #}
     {% if hasUngrouped %}
     <div class="card tab-form-panel active" id="fpanel-__general__" style="border-top-left-radius:0;border-top-right-radius:0">
-      <div class="card-body">
-        <div class="form-grid">
-          {% for field in formFields %}
-          {% if not field.tab %}
-          {% include "partials/form-field.njk" ignore missing %}
-          {{ _self.renderField(field, record, errors) }}
-          {% endif %}
-          {% endfor %}
-        </div>
-      </div>
+      <div class="card-body"><div class="form-grid">
+        {% for field in formFields %}{% if not field.tab %}
+        {% set val = record[field.name] if record[field.name] is defined else '' %}
+        {% set hasError = errors[field.name] is defined %}
+        {% include "partials/form-field.njk" %}
+        {% endif %}{% endfor %}
+      </div></div>
     </div>
     {% endif %}
 
     {# Named tab panels #}
     {% for name in tabNames %}
-    <div class="card tab-form-panel {% if not hasUngrouped and loop.first %}active{% endif %}" id="fpanel-{{ name | replace(' ', '-') }}" style="border-top-left-radius:0;border-top-right-radius:0;{% if not loop.first or hasUngrouped %}display:none{% endif %}">
-      <div class="card-body">
-        <div class="form-grid">
-          {% for field in formFields %}
-          {% if field.tab == name %}
-          {{ _self.renderField(field, record, errors) }}
-          {% endif %}
-          {% endfor %}
-        </div>
-      </div>
+    <div class="card tab-form-panel {% if not hasUngrouped and loop.first %}active{% endif %}"
+      id="fpanel-{{ name | tabId }}"
+      style="border-top-left-radius:0;border-top-right-radius:0;{% if not loop.first or hasUngrouped %}display:none{% endif %}">
+      <div class="card-body"><div class="form-grid">
+        {% for field in formFields %}{% if field.tab == name %}
+        {% set val = record[field.name] if record[field.name] is defined else '' %}
+        {% set hasError = errors[field.name] is defined %}
+        {% include "partials/form-field.njk" %}
+        {% endif %}{% endfor %}
+      </div></div>
     </div>
     {% endfor %}
 
-    {# ══════════════════════════════════════
-       FLAT LAYOUT (no tabs)
-       ══════════════════════════════════════ #}
     {% else %}
-
+    {# Flat layout — no tabs #}
     <div class="card">
       <div class="card-header">
         <span class="card-title">
@@ -133,264 +116,20 @@
         </span>
         {% if isEdit %}<span class="badge badge-gray text-xs">ID: {{ record.id }}</span>{% endif %}
       </div>
-      <div class="card-body">
-        <div class="form-grid">
-          {% for field in formFields %}
-
-          {# ── Fieldset heading ── #}
-          {% if field._isFieldset %}
-          <div class="full" style="grid-column:1/-1;margin-top:8px">
-            <div class="fieldset-heading">{{ field.label }}</div>
-          </div>
-
-          {# ── Readonly field ── #}
-          {% elif field.isReadonly %}
-          <div class="form-group {% if field.span == 'full' or field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full{% endif %}">
-            <div class="form-label">{{ field.label }}</div>
-            <div class="readonly-value">
-              {% set val = record[field.name] %}
-              {% if val is not none and val != '' %}
-                {% if field.type == 'boolean' %}
-                  {% if val %}<span class="badge badge-green">Yes</span>{% else %}<span class="badge badge-gray">No</span>{% endif %}
-                {% elif field.type == 'badge' %}
-                  <span class="badge badge-blue">{{ val }}</span>
-                {% elif field.type == 'datetime' %}
-                  {{ val }}
-                {% elif field.type == 'json' %}
-                  <pre class="readonly-pre">{{ val | dump }}</pre>
-                {% elif field.type == 'image' %}
-                  <img src="{{ val }}" class="cell-image" style="width:48px;height:48px">
-                {% elif field.type == 'url' %}
-                  <a href="{{ val }}" target="_blank" rel="noopener" style="color:var(--primary)">{{ val }}</a>
-                {% elif field.type == 'color' %}
-                  <span style="display:inline-flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:4px;background:{{ val }};border:1px solid var(--border)"></span>{{ val }}</span>
-                {% else %}
-                  {{ val }}
-                {% endif %}
-              {% else %}
-                <span class="cell-muted">—</span>
-              {% endif %}
-            </div>
-          </div>
-
-          {# ── Editable field ── #}
-          {% else %}
-          {% set val = record[field.name] if record[field.name] is defined else '' %}
-          {% set hasError = errors[field.name] is defined %}
-          <div class="form-group
-            {% if field.span == 'full' %}full
-            {% elif field.span == 'third' %}w-third
-            {% elif field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full
-            {% elif field.type == 'boolean' %}w-third
-            {% endif %}"
-            data-field="{{ field.name }}">
-
-            {% if field.type != 'boolean' %}
-            <label class="form-label" for="field-{{ field.name }}">
-              {{ field.label }}
-              {% if not field.nullable %}<span class="required">*</span>{% endif %}
-            </label>
-            {% endif %}
-
-            {# ── Select ── #}
-            {% if field.type == 'select' and field.options %}
-            <select id="field-{{ field.name }}" name="{{ field.name }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-              <option value="">— Select —</option>
-              {% for opt in field.options %}
-              {% set optVal = opt.value if opt.value is defined else opt %}
-              {% set optLabel = opt.label if opt.label is defined else opt %}
-              <option value="{{ optVal }}" {% if val == optVal %}selected{% endif %}>{{ optLabel }}</option>
-              {% endfor %}
-            </select>
-
-            {# ── Boolean ── #}
-            {% elif field.type == 'boolean' %}
-            <div style="padding:8px 0">
-              <label class="check-group" for="field-{{ field.name }}" style="cursor:pointer">
-                <input type="checkbox" id="field-{{ field.name }}" name="{{ field.name }}"
-                  class="check-input" value="1" {% if val %}checked{% endif %}>
-                <span class="check-label">{{ field.label }}</span>
-              </label>
-            </div>
-
-            {# ── Textarea ── #}
-            {% elif field.type == 'textarea' %}
-            <textarea id="field-{{ field.name }}" name="{{ field.name }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or '' }}"
-              {% if not field.nullable %}data-required="true"{% endif %}
-              rows="4">{{ val }}</textarea>
-
-            {# ── JSON ── #}
-            {% elif field.type == 'json' %}
-            <textarea id="field-{{ field.name }}" name="{{ field.name }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder='{"key": "value"}'
-              style="font-family:'DM Mono',monospace;font-size:12px"
-              data-validate="json"
-              rows="5">{{ val | dump if val else '' }}</textarea>
-
-            {# ── Richtext ── #}
-            {% elif field.type == 'richtext' %}
-            <div class="richtext-wrap">
-              <div class="richtext-toolbar">
-                <button type="button" onclick="rtCmd('bold')" title="Bold"><b>B</b></button>
-                <button type="button" onclick="rtCmd('italic')" title="Italic"><i>I</i></button>
-                <button type="button" onclick="rtCmd('underline')" title="Underline"><u>U</u></button>
-                <span class="rt-sep"></span>
-                <button type="button" onclick="rtCmd('insertUnorderedList')" title="Bullet list">≡</button>
-                <button type="button" onclick="rtCmd('insertOrderedList')" title="Numbered list">1.</button>
-                <span class="rt-sep"></span>
-                <button type="button" onclick="rtLink()" title="Link">🔗</button>
-              </div>
-              <div id="rt-{{ field.name }}" class="richtext-editor form-control{% if hasError %} error{% endif %}"
-                contenteditable="true"
-                style="min-height:120px;height:auto">{{ val | safe }}</div>
-              <input type="hidden" id="field-{{ field.name }}" name="{{ field.name }}" value="{{ val }}">
-            </div>
-
-            {# ── Password ── #}
-            {% elif field.type == 'password' %}
-            <div style="position:relative">
-              <input type="password" id="field-{{ field.name }}" name="{{ field.name }}"
-                class="form-control{% if hasError %} error{% endif %}"
-                placeholder="{{ 'Leave blank to keep current' if isEdit else '' }}"
-                {% if not field.nullable and not isEdit %}data-required="true"{% endif %}
-                style="padding-right:40px">
-              <button type="button" class="pw-toggle"
-                onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                </svg>
-              </button>
-            </div>
-
-            {# ── Email ── #}
-            {% elif field.type == 'email' %}
-            <input type="email" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or 'name@example.com' }}"
-              data-validate="email"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── URL ── #}
-            {% elif field.type == 'url' %}
-            <input type="url" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or 'https://' }}"
-              data-validate="url"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── Phone ── #}
-            {% elif field.type == 'phone' %}
-            <input type="tel" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or '+1 555 000 0000' }}"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── Color ── #}
-            {% elif field.type == 'color' %}
-            <div class="flex items-center gap-2">
-              <input type="color" id="field-{{ field.name }}-picker"
-                value="{{ val or '#000000' }}"
-                style="width:40px;height:36px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;padding:2px"
-                oninput="document.getElementById('field-{{ field.name }}').value=this.value">
-              <input type="text" id="field-{{ field.name }}" name="{{ field.name }}"
-                value="{{ val }}"
-                class="form-control{% if hasError %} error{% endif %}"
-                placeholder="#000000"
-                style="width:120px"
-                oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))document.getElementById('field-{{ field.name }}-picker').value=this.value">
-            </div>
-
-            {# ── Number ── #}
-            {% elif field.type == 'number' %}
-            <input type="number" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or '0' }}"
-              {% if field.min is not none %}min="{{ field.min }}" data-min="{{ field.min }}"{% endif %}
-              {% if field.max is not none %}max="{{ field.max }}" data-max="{{ field.max }}"{% endif %}
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── Date ── #}
-            {% elif field.type == 'date' %}
-            <input type="date" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── Datetime ── #}
-            {% elif field.type == 'datetime' %}
-            <input type="datetime-local" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              {% if not field.nullable %}data-required="true"{% endif %}>
-
-            {# ── Default text ── #}
-            {% else %}
-            <input type="text" id="field-{{ field.name }}" name="{{ field.name }}"
-              value="{{ val }}"
-              class="form-control{% if hasError %} error{% endif %}"
-              placeholder="{{ field.placeholder or '' }}"
-              {% if field.max is not none %}maxlength="{{ field.max }}"{% endif %}
-              {% if not field.nullable %}data-required="true"{% endif %}
-              {% if field.prepopulate %}data-prepopulate="{{ field.prepopulate }}"{% endif %}>
-            {% endif %}
-
-            {# ── Error / help ── #}
-            <div class="field-feedback" id="feedback-{{ field.name }}">
-              {% if hasError %}
-              <span class="form-error">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                {{ errors[field.name][0] if errors[field.name] is iterable else errors[field.name] }}
-              </span>
-              {% elif field.help %}
-              <span class="form-help">{{ field.help }}</span>
-              {% endif %}
-            </div>
-          </div>
-          {% endif %}
-
-          {% endfor %}
-        </div>
-      </div>
+      <div class="card-body"><div class="form-grid">
+        {% for field in formFields %}
+        {% set val = record[field.name] if record[field.name] is defined else '' %}
+        {% set hasError = errors[field.name] is defined %}
+        {% include "partials/form-field.njk" %}
+        {% endfor %}
+      </div></div>
     </div>
     {% endif %}
 
-    {# ── Form footer ── #}
-    <div class="flex items-center gap-2" style="margin-top:16px;flex-wrap:wrap">
-      <button type="submit" name="_submit" value="save" class="btn btn-primary" id="submit-btn">
-        <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-save"/></svg></span>
-        {{ 'Save Changes' if isEdit else 'Create ' + resource.singular }}
-      </button>
-      <button type="submit" name="_submit" value="continue" class="btn btn-ghost btn-sm">
-        Save and continue editing
-      </button>
-      {% if not isEdit %}
-      <button type="submit" name="_submit" value="add_another" class="btn btn-ghost btn-sm">
-        Save and add another
-      </button>
-      {% endif %}
-      <a href="{{ adminPrefix }}/{{ resource.slug }}" class="btn btn-ghost">Cancel</a>
-
-      {% if isEdit and resource.canDelete %}
-      <button type="button" class="btn btn-danger" style="margin-left:auto"
-        onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/delete', '{{ resource.singular }} #{{ record.id }}')">
-        <span class="icon icon-14"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
-        Delete
-      </button>
-      {% endif %}
-    </div>
-
+    {% include "partials/form-footer.njk" %}
   </form>
 
-  {# ── Timestamps ── #}
+  {# Timestamps #}
   {% if isEdit and (record.created_at or record.updated_at) %}
   <div class="flex gap-4" style="margin-top:12px;padding:0 2px">
     {% if record.created_at %}
@@ -407,302 +146,11 @@
     {% endif %}
   </div>
   {% endif %}
+
 </div>
 
-<style>
-  /* ── Tab nav (form) ── */
-  .tab-nav {
-    display: flex;
-    gap: 0;
-    overflow-x: auto;
-  }
-  .tab-btn {
-    padding: 10px 18px;
-    font-size: 13.5px;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    cursor: pointer;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: color .12s, border-color .12s;
-  }
-  .tab-btn:hover  { color: var(--text-soft); }
-  .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); background: var(--primary-soft); }
-
-  .tab-form-panel { display: none; }
-  .tab-form-panel.active { display: block; }
-
-  /* ── Readonly ── */
-  .readonly-value {
-    font-size: 13.5px;
-    color: var(--text-soft);
-    padding: 8px 12px;
-    background: var(--surface2);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius-sm);
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .readonly-pre {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px;
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    margin: 0;
-    color: var(--text-soft);
-  }
-
-  /* ── Password toggle ── */
-  .pw-toggle {
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    padding: 0;
-  }
-  .pw-toggle:hover { color: var(--text-soft); }
-
-  /* ── Richtext ── */
-  .richtext-wrap { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-  .richtext-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 8px;
-    background: var(--surface2);
-    border-bottom: 1px solid var(--border);
-  }
-  .richtext-toolbar button {
-    width: 28px; height: 28px;
-    display: flex; align-items: center; justify-content: center;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--text-soft);
-    font-family: inherit;
-    transition: all .1s;
-  }
-  .richtext-toolbar button:hover { background: var(--surface3); border-color: var(--border); }
-  .rt-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
-  .richtext-editor {
-    border: none !important;
-    border-radius: 0 !important;
-    outline: none !important;
-    box-shadow: none !important;
-    padding: 12px;
-    line-height: 1.6;
-  }
-  .richtext-editor:focus { outline: none; }
-
-  /* ── Field feedback ── */
-  .field-feedback:empty { display: none; }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-</style>
-
-<script>
-  // ── Tab switching ──────────────────────────────────────────────
-  function switchFormTab(name, btn) {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-form-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
-    btn.classList.add('active');
-    const safeId = name.replace(/\s+/g, '-');
-    const panel = document.getElementById(`fpanel-${safeId}`);
-    if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
-  }
-
-  // ── Richtext sync ─────────────────────────────────────────────
-  document.querySelectorAll('.richtext-editor').forEach(editor => {
-    const fieldName = editor.id.replace('rt-', '');
-    const hidden = document.getElementById(`field-${fieldName}`);
-    if (!hidden) return;
-    editor.addEventListener('input', () => { hidden.value = editor.innerHTML; });
-  });
-  function rtCmd(cmd) {
-    document.execCommand(cmd, false, null);
-  }
-  function rtLink() {
-    const url = prompt('Enter URL:');
-    if (url) document.execCommand('createLink', false, url);
-  }
-
-  // ── Client-side validation ─────────────────────────────────────
-  const form = document.getElementById('record-form');
-
-  function showFieldError(name, msg) {
-    const input = document.getElementById(`field-${name}`) || document.querySelector(`[name="${name}"]`);
-    if (input) input.classList.add('error');
-    const fb = document.getElementById(`feedback-${name}`);
-    if (fb) {
-      fb.innerHTML = `<span class="form-error">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        ${msg}
-      </span>`;
-    }
-  }
-
-  function clearFieldError(name) {
-    const input = document.getElementById(`field-${name}`) || document.querySelector(`[name="${name}"]`);
-    if (input) input.classList.remove('error');
-    const fb = document.getElementById(`feedback-${name}`);
-    if (fb) { const help = fb.dataset.help; fb.innerHTML = help ? `<span class="form-help">${help}</span>` : ''; }
-  }
-
-  // Live validation on blur
-  document.querySelectorAll('.form-control').forEach(input => {
-    input.addEventListener('blur', () => validateField(input));
-    input.addEventListener('input', () => {
-      if (input.classList.contains('error')) validateField(input);
-    });
-  });
-
-  function validateField(input) {
-    const name = input.name;
-    if (!name) return true;
-    const val = input.value.trim();
-    const required = input.dataset.required === 'true';
-    const validate = input.dataset.validate;
-
-    clearFieldError(name);
-
-    if (required && val === '') {
-      const label = document.querySelector(`label[for="field-${name}"]`)?.textContent?.replace('*','').trim() || name;
-      showFieldError(name, `${label} is required`);
-      return false;
-    }
-
-    if (val && validate === 'email') {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
-        showFieldError(name, 'Please enter a valid email address');
-        return false;
-      }
-    }
-
-    if (val && validate === 'url') {
-      try { new URL(val); } catch {
-        showFieldError(name, 'Please enter a valid URL (include https://)');
-        return false;
-      }
-    }
-
-    if (val && validate === 'json') {
-      try { JSON.parse(val); } catch {
-        showFieldError(name, 'Invalid JSON format');
-        return false;
-      }
-    }
-
-    if (val && input.dataset.min !== undefined && Number(val) < Number(input.dataset.min)) {
-      showFieldError(name, `Minimum value is ${input.dataset.min}`);
-      return false;
-    }
-
-    if (val && input.dataset.max !== undefined && Number(val) > Number(input.dataset.max)) {
-      showFieldError(name, `Maximum value is ${input.dataset.max}`);
-      return false;
-    }
-
-    return true;
-  }
-
-  // Full form validation on submit
-  form?.addEventListener('submit', function(e) {
-    let valid = true;
-    let firstError = null;
-
-    document.querySelectorAll('.form-control').forEach(input => {
-      if (!validateField(input)) {
-        valid = false;
-        if (!firstError) firstError = input;
-      }
-    });
-
-    if (!valid) {
-      e.preventDefault();
-      firstError?.focus();
-      firstError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-
-    // Prevent double-submit
-    const btn = document.getElementById('submit-btn');
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Saving…`;
-    }
-  });
-
-  // ── Auto-switch to the tab containing the first error
-  const firstErrorField = document.querySelector('.form-control.error');
-  if (firstErrorField) {
-    const group = firstErrorField.closest('[data-field]');
-    if (group) {
-      const panel = group.closest('.tab-form-panel');
-      if (panel) {
-        const panelId = panel.id.replace('fpanel-', '');
-        const btn = document.querySelector(`.tab-btn[data-tab="${panelId}"]`);
-        if (btn) switchFormTab(panelId, btn);
-      }
-    }
-  }
-
-  // ── Prepopulate (slug auto-fill from source field) ────────────
-  (function() {
-    const prepopMappings = {};
-    document.querySelectorAll('[data-prepopulate]').forEach(el => {
-      prepopMappings[el.name] = el.dataset.prepopulate;
-    });
-
-    function slugify(str) {
-      return str.toLowerCase()
-        .replace(/[^\w\s-]/g, '')
-        .replace(/[\s_]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    }
-
-    for (const [targetName, sourceName] of Object.entries(prepopMappings)) {
-      const srcEl = document.querySelector(`[name="${sourceName}"]`);
-      const tgtEl = document.querySelector(`[name="${targetName}"]`);
-      if (!srcEl || !tgtEl) continue;
-
-      let userEdited = !!tgtEl.value;
-      tgtEl.addEventListener('input', () => { userEdited = true; });
-      srcEl.addEventListener('input', () => {
-        if (!userEdited) tgtEl.value = slugify(srcEl.value);
-      });
-    }
-  })();
-</script>
-
-<style>
-  .fieldset-heading {
-    font-size: 11.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .6px;
-    color: var(--text-muted);
-    padding: 16px 0 10px;
-    border-bottom: 1px solid var(--border-soft);
-    margin-bottom: 2px;
-    grid-column: 1 / -1;
-  }
-</style>
+<script src="{{ adminPrefix }}/static/date-picker.js"></script>
+{% include "partials/form-scripts.njk" %}
+{% include "partials/json-dialog.njk" %}
+<script src="{{ adminPrefix }}/static/json-editor.js"></script>
 {% endblock %}

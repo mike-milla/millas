@@ -128,8 +128,69 @@ class Model {
   static primaryKey  = 'id';
   static timestamps  = true;
   static softDeletes = false;
-  static fields      = {};
   static connection  = null;
+
+  /**
+   * Own fields declared directly on this class only.
+   * Subclasses override this with just their own additions/overrides —
+   * no need to spread parent fields manually (like Django's AbstractUser).
+   *
+   *   class User extends AuthUser {
+   *     static ownFields = {
+   *       phone: fields.string({ nullable: true }),
+   *       role:  fields.enum(['tenant', 'landlord'], { default: 'tenant' }),
+   *     };
+   *   }
+   *
+   * You can still use 'static fields = {...}' to completely replace the schema.
+   */
+  /**
+   * Merged field map — walks the prototype chain and merges fields from:
+   *   - The class itself (always)
+   *   - Any ancestor marked 'static abstract = true' (fields flow down)
+   *   - Concrete ancestors with the same table (single-table inheritance)
+   *
+   * Child fields win on collision. Result is cached per class.
+   *
+   * Usage — just declare what's new or overridden, no spread needed:
+   *
+   *   class AuthUser extends Model {
+   *     static abstract = true;
+   *     static fields = { id: fields.id(), email: fields.string() };
+   *   }
+   *   class User extends AuthUser {
+   *     static table  = 'users';
+   *     static fields = { phone: fields.string(), role: fields.enum([...]) };
+   *     // User.getFields() → id, email, phone, role  (merged)
+   *   }
+   */
+  static getFields() {
+    if (Object.prototype.hasOwnProperty.call(this, '_cachedFields')) return this._cachedFields;
+
+    const chain   = [];
+    const myTable = this.table || this.name;
+    let cur       = this;
+
+    while (cur && cur !== Function.prototype) {
+      if (Object.prototype.hasOwnProperty.call(cur, 'fields')) {
+        chain.unshift(cur.fields); // ancestor first → child wins in Object.assign
+      }
+      const curTable = cur.table || cur.name;
+      // Stop walking when we reach a non-abstract ancestor with a different table
+      // (that's a separate model with its own migration — don't merge its fields)
+      if (cur !== this && !cur.abstract && curTable !== myTable) break;
+      cur = Object.getPrototypeOf(cur);
+    }
+
+    const merged = Object.assign({}, ...chain);
+    Object.defineProperty(this, '_cachedFields', {
+      value: merged, writable: true, configurable: true, enumerable: false,
+    });
+    return merged;
+  }
+
+  /** Clear the fields cache — call if fields are modified at runtime. */
+  static _clearFieldCache() { delete this._cachedFields; }
 
   /** Define named scopes: static scopes = { published: qb => qb.where('published', true) } */
   static scopes = {};
@@ -340,7 +401,7 @@ class Model {
    *   Post.defer('body', 'metadata').get()
    */
   static defer(...columns) {
-    const all     = Object.keys(this.fields);
+    const all     = Object.keys(this.getFields());
     const exclude = new Set(columns);
     const keep    = all.filter(c => !exclude.has(c));
     return new QueryBuilder(this._db(), this).select(...keep.map(c => `${this.table}.${c}`));
@@ -495,7 +556,7 @@ class Model {
     // Start with explicitly declared relations
     const merged = { ...(this.relations || {}) };
 
-    for (const [fieldName, fieldDef] of Object.entries(this.fields || {})) {
+    for (const [fieldName, fieldDef] of Object.entries(this.getFields())) {
 
       // ── ForeignKey / OneToOne ────────────────────────────────────────────
       if (fieldDef._isForeignKey) {
@@ -519,11 +580,14 @@ class Model {
             return M;
           };
 
+          // Django convention: declared as 'landlord' → DB column 'landlord_id'.
+          // If already ends with _id (e.g. declared as 'landlord_id'), use as-is.
+          const colName = fieldName.endsWith('_id') ? fieldName : fieldName + '_id';
+
           if (fieldDef._isOneToOne) {
-            // OneToOne: BelongsTo on the declaring side
-            merged[accessorName] = new BelongsTo(resolveModel, fieldName.endsWith('_id') ? fieldName : fieldName + '_id', toField);
+            merged[accessorName] = new BelongsTo(resolveModel, colName, toField);
           } else {
-            merged[accessorName] = new BelongsTo(resolveModel, fieldName.endsWith('_id') ? fieldName : fieldName + '_id', toField);
+            merged[accessorName] = new BelongsTo(resolveModel, colName, toField);
           }
         }
       }
@@ -694,7 +758,7 @@ class Model {
 
   static _applyDefaults(data) {
     const result = { ...data };
-    for (const [key, field] of Object.entries(this.fields)) {
+    for (const [key, field] of Object.entries(this.getFields())) {
       if (!(key in result) && field.default !== undefined) {
         result[key] = typeof field.default === 'function'
           ? field.default()
@@ -705,11 +769,15 @@ class Model {
   }
 
   static _defaultTable() {
-    const name = this.name.toLowerCase();
-    if (name.endsWith('y') && !['ay','ey','iy','oy','uy'].some(s => name.endsWith(s)))
-      return name.slice(0, -1) + 'ies';
-    if (/(?:s|sh|ch|x|z)$/.test(name)) return name + 'es';
-    return name + 's';
+    // Convert PascalCase class name to snake_case plural table name.
+    // BlogPost → blog_posts, Category → categories, User → users.
+    const snake = this.name
+      .replace(/([A-Z])/g, (m, c, i) => (i ? '_' : '') + c.toLowerCase())
+      .replace(/^_/, '');
+    if (snake.endsWith('y') && !['ay','ey','iy','oy','uy'].some(s => snake.endsWith(s)))
+      return snake.slice(0, -1) + 'ies';
+    if (/(?:s|sh|ch|x|z)$/.test(snake)) return snake + 'es';
+    return snake + 's';
   }
 
   _getDirty() {

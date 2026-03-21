@@ -99,8 +99,11 @@
             <div class="detail-label">{{ field.label }}</div>
             <div class="detail-value">
               {% set val = record[field.name] %}
-              {% include "partials/detail-value.njk" ignore missing %}
-              {{ val | adminCell(field) | safe if val is not none else '<span class="cell-muted">—</span>' }}
+              {% if val is not none %}
+                {{ val | adminCell(field) | safe }}
+              {% else %}
+                <span class="cell-muted">—</span>
+              {% endif %}
             </div>
           </div>
           {% endif %}
@@ -125,7 +128,11 @@
           <div class="detail-label">{{ field.label }}</div>
           <div class="detail-value">
             {% set val = record[field.name] %}
-            {{ val | adminDetail(field) | safe }}
+            {% if val is not none %}
+              {{ val | adminDetail(field) | safe }}
+            {% else %}
+              <span class="cell-muted">—</span>
+            {% endif %}
           </div>
         </div>
         {% endif %}
@@ -161,6 +168,7 @@
     </a>
     {% elif ra.action %}
     <form method="POST" action="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/action/{{ ra.action }}" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}">
       <button type="submit" class="btn btn-ghost btn-sm">
         <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ ra.icon or 'check' }}"/></svg></span>
         {{ ra.label }}
@@ -179,6 +187,8 @@
 {% if inlines | length %}
 <div style="max-width:860px;margin-top:24px">
   {% for inline in inlines %}
+  {% set inlineIndex = loop.index0 %}
+  {% set inlineBase  = adminPrefix + '/' + resource.slug + '/' + record.id + '/inline/' + inlineIndex %}
   <div class="card mb-5">
     <div class="card-header">
       <span class="card-title">
@@ -191,13 +201,39 @@
         {% endif %}
       </span>
       {% if inline.canCreate %}
-      <a href="{{ adminPrefix }}/{{ inline.label | lower | replace(' ', '-') }}/create?{{ inline.foreignKey }}={{ record.id }}"
-         class="btn btn-ghost btn-sm">
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('inline-form-{{ inlineIndex }}').style.display='block';this.style.display='none'">
         <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
-        Add {{ inline.label | replace('s','') if inline.label | last == 's' else inline.label }}
-      </a>
+        Add
+      </button>
       {% endif %}
     </div>
+
+    {# ── Inline quick-add form ── #}
+    {% if inline.canCreate %}
+    <div id="inline-form-{{ inlineIndex }}" style="display:none;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface)">
+      <form method="POST" action="{{ inlineBase }}">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          {% for field in inline.fields %}
+          {% if field.name != inline.foreignKey %}
+          <div style="flex:1;min-width:140px">
+            <label class="form-label" style="font-size:11px">{{ field.label }}</label>
+            {% if field.type == 'boolean' %}
+            <input type="checkbox" name="{{ field.name }}" value="1">
+            {% else %}
+            <input type="{{ field.type or 'text' }}" name="{{ field.name }}" class="form-control form-control-sm" placeholder="{{ field.label }}">
+            {% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+          <div style="display:flex;gap:6px">
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('inline-form-{{ inlineIndex }}').style.display='none';this.closest('.card').querySelector('.btn-ghost').style.display=''">Cancel</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    {% endif %}
 
     {% if inline.rows | length %}
     <div class="table-wrap">
@@ -217,16 +253,22 @@
           <tr>
             {% for field in inline.fields %}
             <td {% if loop.first %}class="td-primary"{% endif %}>
-              {{ row[field.name] | adminCell(field) | safe if row[field.name] is not none else '<span class="cell-muted">—</span>' }}
+              {% if row[field.name] is not none %}
+                {{ row[field.name] | adminCell(field) | safe }}
+              {% else %}
+                <span class="cell-muted">—</span>
+              {% endif %}
             </td>
             {% endfor %}
             {% if inline.canDelete %}
             <td class="col-actions" style="text-align:right">
-              <button
-                onclick="confirmDelete('{{ adminPrefix }}/{{ inline.label | lower | replace(' ','-') }}/{{ row.id }}/delete','{{ inline.label | replace('s','') if inline.label | last == 's' else inline.label }} #{{ row.id }}')"
-                class="btn btn-danger btn-xs">
-                <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
-              </button>
+              <form method="POST" action="{{ inlineBase }}/{{ row.id }}/delete" style="display:inline">
+                <input type="hidden" name="_csrf" value="{{ csrfToken }}">
+                <button type="submit" class="btn btn-danger btn-xs"
+                  onclick="return confirm('Delete this record?')">
+                  <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
+                </button>
+              </form>
             </td>
             {% endif %}
           </tr>
@@ -240,13 +282,6 @@
         <span class="icon icon-16"><svg viewBox="0 0 24 24"><use href="#ic-table"/></svg></span>
       </div>
       <div class="empty-title" style="font-size:13px">No {{ inline.label | lower }} yet</div>
-      {% if inline.canCreate %}
-      <a href="{{ adminPrefix }}/{{ inline.label | lower | replace(' ', '-') }}/create?{{ inline.foreignKey }}={{ record.id }}"
-         class="btn btn-ghost btn-sm" style="margin-top:10px">
-        <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
-        Add first
-      </a>
-      {% endif %}
     </div>
     {% endif %}
   </div>

@@ -1,6 +1,7 @@
 'use strict';
 
-const { FieldDefinition } = require('../fields');
+const { applyColumn } = require('./operations/column');
+const { normaliseField } = require('./ProjectState');
 
 /**
  * SchemaBuilder
@@ -27,7 +28,7 @@ class SchemaBuilder {
     const fields = ModelClass.fields;
 
     await this._db.schema.createTable(table, (t) => {
-      this._applyFields(t, fields, ModelClass);
+      this._applyFields(t, fields);
     });
   }
 
@@ -87,85 +88,11 @@ class SchemaBuilder {
 
   // ─── Internal ─────────────────────────────────────────────────────────────
 
-  _applyFields(tableBuilder, fields, ModelClass) {
+  // Delegates to operations/column.js applyColumn — single source of truth
+  // for the type → knex column builder mapping.
+  _applyFields(tableBuilder, fields) {
     for (const [name, field] of Object.entries(fields)) {
-      this._applyField(tableBuilder, name, field, ModelClass);
-    }
-  }
-
-  _applyField(t, name, field) {
-    let col;
-
-    switch (field.type) {
-      case 'id':
-        t.increments(name);
-        return;
-
-      case 'string':
-        col = t.string(name, field.max || 255);
-        break;
-
-      case 'text':
-        col = t.text(name);
-        break;
-
-      case 'integer':
-        col = field.unsigned ? t.integer(name).unsigned() : t.integer(name);
-        break;
-
-      case 'bigInteger':
-        col = field.unsigned ? t.bigInteger(name).unsigned() : t.bigInteger(name);
-        break;
-
-      case 'float':
-        col = t.float(name);
-        break;
-
-      case 'decimal':
-        col = t.decimal(name, field.precision || 8, field.scale || 2);
-        break;
-
-      case 'boolean':
-        col = t.boolean(name);
-        break;
-
-      case 'json':
-        col = t.json(name);
-        break;
-
-      case 'date':
-        col = t.date(name);
-        break;
-
-      case 'timestamp':
-        col = t.timestamp(name, { useTz: false });
-        break;
-
-      case 'enum':
-        col = t.enum(name, field.enumValues || []);
-        break;
-
-      case 'uuid':
-        col = t.uuid(name);
-        break;
-
-      default:
-        col = t.string(name);
-    }
-
-    if (!col) return;
-
-    if (field.nullable)               col = col.nullable();
-    else if (field.type !== 'id')     col = col.notNullable();
-
-    if (field.unique)                 col = col.unique();
-
-    if (field.default !== undefined)  col = col.defaultTo(field.default);
-
-    if (field.references) {
-      col = col.references(field.references.column)
-                .inTable(field.references.table)
-                .onDelete('CASCADE');
+      applyColumn(tableBuilder, name, normaliseField(field));
     }
   }
 }

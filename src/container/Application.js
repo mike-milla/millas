@@ -98,6 +98,22 @@ class Application {
         await this._providers.boot();
         this._booted = true;
 
+        // Wire cache, db, and storage into AI manager now that providers are booted
+        try {
+          const ai = this._container.make('ai');
+          if (ai) {
+            try { const cache = this._container.make('cache'); if (cache) ai.setCache(cache); } catch {}
+            try { const db    = this._container.make('db');    if (db)    ai.setDb(db);       } catch {}
+            try { const store = this._container.make('storage'); if (store) ai.setStorage(store); } catch {}
+            // Attach files and stores API as properties
+            try {
+              const { AIFilesAPI, AIStoresAPI } = require('../ai/files');
+              if (!ai.files)  Object.defineProperty(ai, 'files',  { get: () => new AIFilesAPI(ai),  configurable: true });
+              if (!ai.stores) Object.defineProperty(ai, 'stores', { get: () => new AIStoresAPI(ai), configurable: true });
+            } catch {}
+          }
+        } catch { /* ai not registered — skip */ }
+
         this._emitSync('platform.booted', {providers: this._providers.list()});
 
         return this;
@@ -286,6 +302,20 @@ class Application {
             routeRegistry: this._route?.getRegistry?.() || null,
         });
         this._container.instance('url', urlGenerator);
+
+        const { HashManager } = require('../hashing/Hash');
+        const hashManager = new HashManager({ default: 'bcrypt', bcrypt: { rounds: 12 } });
+        this._container.instance('hash', hashManager);
+
+        const ProcessManager = require('../process/Process').ProcessManager;
+        this._container.instance('process', new ProcessManager());
+
+        const { AIManager } = require('../ai/AIManager');
+        const basePath = (() => { try { return this._container.make('basePath'); } catch { return process.cwd(); } })();
+        let aiConfig = { default: process.env.AI_PROVIDER || 'anthropic', providers: {} };
+        try { aiConfig = require(basePath + '/config/ai'); } catch { /* no config — use env vars */ }
+        const aiManager = new AIManager(aiConfig);
+        this._container.instance('ai', aiManager);
 
 
         this._mwRegistry.register('cors', new CorsMiddleware());

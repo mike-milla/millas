@@ -41,7 +41,6 @@ const { CacheServiceProvider, StorageServiceProvider } = require('../providers/C
 // ── Storage ───────────────────────────────────────────────────────
 const Storage     = require('../storage/Storage');
 const LocalDriver = require('../storage/drivers/LocalDriver');
-
 module.exports = {
   // ── Millas HTTP layer ──────────────────────────────────────────
   MillasRequest, MillasResponse, ResponseDispatcher, RequestContext,
@@ -56,12 +55,5 @@ module.exports = {
   Cache, MemoryDriver, FileDriver, NullDriver, CacheServiceProvider,
   // Storage
   Storage, LocalDriver, StorageServiceProvider,
+  Log: require('../logger').Log,
 };
-
-// ── Admin ─────────────────────────────────────────────────────────
-const { Admin, AdminResource, AdminField, AdminFilter } = require('../admin');
-const AdminServiceProvider = require('../providers/AdminServiceProvider');
-
-Object.assign(module.exports, {
-  Admin, AdminResource, AdminField, AdminFilter, AdminServiceProvider,
-});

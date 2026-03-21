@@ -70,36 +70,36 @@ storage/uploads/*
 database/database.sqlite
 `,
 
-    // ─── millas.config.js ─────────────────────────────────────────
-    'millas.config.js': `'use strict';
-
-module.exports = {
-  /*
-  |--------------------------------------------------------------------------
-  | Millas Framework Configuration
-  |--------------------------------------------------------------------------
-  */
-  providers: [
-    './providers/AppServiceProvider',
-  ],
-};
-`,
-
     // ─── bootstrap/app.js ─────────────────────────────────────────
+
     'bootstrap/app.js': `'use strict';
 
 require('dotenv').config();
 
+const path = require('path');
 const { Millas } = require('millas');
 const AppServiceProvider = require('../providers/AppServiceProvider');
 
-module.exports = Millas.config()
-  .providers([AppServiceProvider])
+/**
+ * Application configuration and bootstrap.
+ *
+ * Millas.configure(__dirname/..) sets the project root so the framework
+ * locates config files, models, and routes without guessing.
+ *
+ * Core providers (Database, Auth, Admin, Cache, Mail, Queue, Events)
+ * are wired automatically — only add your own app providers below.
+ *
+ * First-time setup:
+ *   millas migrate          # creates system tables (users, admin_log, sessions)
+ *   millas createsuperuser  # creates your first admin panel user
+ */
+module.exports = Millas.configure(path.join(__dirname, '..'))
+  .withAdmin()
   .routes(Route => {
     require('../routes/web')(Route);
     require('../routes/api')(Route);
   })
-  .withAdmin()
+  .providers([AppServiceProvider])
   .create();
 `,
 
@@ -153,7 +153,12 @@ module.exports = {
   key: process.env.APP_KEY || '',
   debug: process.env.APP_ENV !== 'production',
   timezone: 'UTC',
-  locale: 'en',
+  locale:   'en',
+  fallback: 'en',
+
+  // Set use_i18n: true to enable the translation system.
+  // Then run: millas lang:publish <locale>
+  use_i18n: false,
 };
 `,
 
@@ -217,6 +222,50 @@ module.exports = {
 };
 `,
 
+    // ─── config/admin.js ──────────────────────────────────────────
+    'config/admin.js': `'use strict';
+
+/**
+ * Admin Panel Configuration
+ *
+ * Credentials are read from environment variables by default.
+ * Set ADMIN_EMAIL and ADMIN_PASSWORD in your .env file, or define
+ * static users / a model here.
+ */
+module.exports = {
+  // URL prefix for the admin panel
+  prefix: '/admin',
+
+  // Title shown in the browser tab and sidebar
+  title: process.env.APP_NAME ? \`\${process.env.APP_NAME} Admin\` : 'Millas Admin',
+
+  auth: {
+    // ── Option 1: static user list (simple setups / local dev) ────
+    users: [
+      {
+        email:    process.env.ADMIN_EMAIL    || 'admin@example.com',
+        // Use a bcrypt hash in production; plain text is fine for local dev.
+        password: process.env.ADMIN_PASSWORD || 'change-me',
+        name:     process.env.ADMIN_NAME     || 'Admin',
+      },
+    ],
+
+    // ── Option 2: model-based lookup ──────────────────────────────
+    // Uncomment and set to any Millas Model that has email + password fields.
+    // model: require('../app/models/User'),
+
+    // ── Session cookie settings ───────────────────────────────────
+    cookieName:   'millas_admin',
+    cookieMaxAge: 60 * 60 * 8,        // 8 hours
+    rememberAge:  60 * 60 * 24 * 30,  // 30 days ("remember me")
+
+    // ── Brute-force protection ────────────────────────────────────
+    maxAttempts:    5,
+    lockoutMinutes: 15,
+  },
+};
+`,
+
     // ─── config/mail.js ───────────────────────────────────────────
     'config/mail.js': `'use strict';
 
@@ -264,10 +313,18 @@ class AppServiceProvider extends ServiceProvider {
   }
 
   async boot(container, app) {
-    // Register Admin resources:
+    // Register Admin resources — Admin panel is auto-mounted via .withAdmin()
     // const { Admin } = require('millas');
+    // const { AdminResource, AdminField } = require('millas');
     // const Post = require('../app/models/Post');
-    // Admin.register(Post);
+    //
+    // class PostResource extends AdminResource {
+    //   static model      = Post;
+    //   static label      = 'Posts';
+    //   static searchable = ['title', 'body'];
+    // }
+    //
+    // Admin.register(PostResource);
   }
 }
 

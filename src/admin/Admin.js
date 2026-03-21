@@ -2,9 +2,14 @@
 
 const path        = require('path');
 const nunjucks    = require('nunjucks');
-const ActivityLog = require('./ActivityLog');
+const ActivityLog  = require('./ActivityLog');
+const { HookPipeline, AdminHooks } = require('./HookRegistry');
+const { FormGenerator }              = require('./FormGenerator');
+const { ViewContext }                 = require('./ViewContext');
 const AdminAuth   = require('./AdminAuth');
 const { AdminResource, AdminField, AdminFilter, AdminInline } = require('./resources/AdminResource');
+const LookupParser = require('../orm/query/LookupParser');
+const Facade       = require('../facades/Facade');
 
 /**
  * Admin
@@ -79,6 +84,19 @@ class Admin {
     const prefix = this._config.prefix;
     this._njk    = this._setupNunjucks(expressApp);
 
+    // ── Static assets ────────────────────────────────────────────────────────
+    // Serve ui.js from the admin source directory as a static file.
+    // Loaded by base.njk as /admin/static/ui.js
+    // Serve all files from src/admin/static/ at /admin/static/*
+    const _staticPath = require('path').join(__dirname, 'static');
+    expressApp.use(prefix + '/static', require('express').static(_staticPath, {
+      maxAge: '1h',
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('.js'))  res.setHeader('Content-Type', 'application/javascript');
+        if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
+      },
+    }));
+
     // ── Auth middleware (runs before all admin routes) ──────────
     expressApp.use(prefix, AdminAuth.middleware(prefix));
 
@@ -107,6 +125,17 @@ class Admin {
     expressApp.post  (`${prefix}/:resource/bulk-action`,       (q, s) => this._bulkAction(q, s));
     expressApp.post  (`${prefix}/:resource/:id/action/:action`,(q, s) => this._rowAction(q, s));
 
+    // ── Relationship API ─────────────────────────────────────────────────────
+    // Used by FK and M2M widgets to fetch options via autocomplete.
+    // Returns JSON: [{ id, label }, ...]
+    expressApp.get(`${prefix}/api/:resource/options`, (q, s) => this._apiOptions(q, s));
+
+    // ── Inline CRUD routes ───────────────────────────────────────────────────
+    // Inline create:  POST /admin/:resource/:id/inline/:inlineIndex
+    // Inline delete:  POST /admin/:resource/:id/inline/:inlineIndex/:rowId/delete
+    expressApp.post(`${prefix}/:resource/:id/inline/:inlineIndex`,                    (q, s) => this._inlineStore(q, s));
+    expressApp.post(`${prefix}/:resource/:id/inline/:inlineIndex/:rowId/delete`,      (q, s) => this._inlineDestroy(q, s));
+
     return this;
   }
 
@@ -121,6 +150,17 @@ class Admin {
     });
 
     // ── Custom filters ───────────────────────────────────────────
+
+    // Resolve a fkResource table name to the registered admin slug (or null)
+    const resolveFkSlug = (tableName) => {
+      if (!tableName) return null;
+      if (this._resources.has(tableName)) return tableName;
+      for (const R of this._resources.values()) {
+        if (R.model && R.model.table === tableName) return R.slug;
+      }
+      return null;
+    };
+
     env.addFilter('adminCell', (value, field) => {
       if (value === null || value === undefined) return '<span class="cell-muted">—</span>';
       switch (field.type) {
@@ -154,6 +194,22 @@ class Admin {
           return `<code class="cell-mono">${JSON.stringify(value).slice(0, 40)}…</code>`;
         case 'email':
           return `<a href="mailto:${value}" style="color:var(--primary);text-decoration:none">${value}</a>`;
+        case 'url':
+          return `<a href="${value}" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:none;word-break:break-all">${value}</a>`;
+        case 'phone':
+          return `<a href="tel:${value}" style="color:var(--primary);text-decoration:none">${value}</a>`;
+        case 'color':
+          return `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:16px;height:16px;border-radius:3px;background:${value};border:1px solid var(--border);flex-shrink:0"></span><span class="cell-mono">${value}</span></span>`;
+        case 'richtext':
+          return `<div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-soft)">${String(value).replace(/<[^>]+>/g, '').slice(0, 80)}</div>`;
+        case 'fk': {
+          const fkSlug = resolveFkSlug(field.fkResource);
+          const prefix = this._config.prefix || '/admin';
+          if (fkSlug) {
+            return `<span class="fk-cell">${value}<a class="fk-arrow-btn" href="${prefix}/${fkSlug}/${value}" title="View record #${value}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></span>`;
+          }
+          return String(value);
+        }
         default: {
           const str = String(value);
           return str.length > 60
@@ -201,6 +257,21 @@ class Admin {
           } catch { return String(value); }
         case 'richtext':
           return `<div style="line-height:1.6;color:var(--text-soft)">${value}</div>`;
+        case 'phone':
+          return `<a href="tel:${value}" style="color:var(--primary)">${value}</a>`;
+        case 'badge': {
+          const colorMap2 = { admin:'purple', user:'blue', active:'green', inactive:'gray', pending:'yellow', published:'green', draft:'gray', banned:'red' };
+          const c2 = (field.colors && field.colors[String(value)]) || colorMap2[String(value)] || 'gray';
+          return `<span class="badge badge-${c2}">${value}</span>`;
+        }
+        case 'fk': {
+          const fkSlug = resolveFkSlug(field.fkResource);
+          const prefix = this._config.prefix || '/admin';
+          if (fkSlug) {
+            return `<span class="fk-cell fk-cell-detail">${value}<a class="fk-arrow-btn" href="${prefix}/${fkSlug}/${value}" title="View record #${value}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></span>`;
+          }
+          return String(value);
+        }
         default: {
           const str = String(value);
           return str;
@@ -212,6 +283,13 @@ class Admin {
     });
 
     env.addFilter('min', (arr) => Math.min(...arr));
+
+    // tabId: convert a tab name to a CSS/jQuery safe id fragment.
+    // Strips everything that is not alphanumeric, underscore, or hyphen.
+    // 'Role & Access' → 'Role--Access', 'Details' → 'Details'
+    env.addFilter('tabId', (name) =>
+      String(name).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''));
+
 
     env.addFilter('relativeTime', (iso) => {
       try {
@@ -230,19 +308,43 @@ class Admin {
   // ─── Base render context ──────────────────────────────────────────────────
 
   _ctx(req, extra = {}) {
+    // Resolve the auth user model from the container so we can tag its
+    // resource as 'auth' in the sidebar — automatic, no dev config needed.
+    let authUserModel = null;
+    try {
+      const container = Facade._container;
+      if (container) {
+        const auth = container.make('auth');
+        authUserModel = auth?._UserModel || null;
+      }
+    } catch { /* container not booted yet or auth not registered */ }
+
+    // A resource is in the 'auth' category if:
+    //   1. Its model is the configured auth_user model, OR
+    //   2. The developer explicitly set static authCategory = 'auth'
+    const isAuthResource = (r) => {
+      if (r.authCategory === 'auth') return true;
+      if (authUserModel && r.model && r.model === authUserModel) return true;
+      return false;
+    };
+
     return {
+      csrfToken:      AdminAuth.enabled ? AdminAuth.csrfToken(req) : 'disabled',
       adminPrefix:    this._config.prefix,
       adminTitle:     this._config.title,
       adminUser:      req.adminUser || null,
       authEnabled:    AdminAuth.enabled,
-      resources:      this.resources().map((r, idx) => ({
-        slug:     r.slug,
-        label:    r._getLabel(),
-        singular: r._getLabelSingular(),
-        icon:     r.icon,
-        canView:  r.canView,
-        index:    idx + 1,
-      })),
+      resources:      this.resources()
+        .filter(r => r.hasPermission(req.adminUser || null, 'view'))
+        .map((r, idx) => ({
+          slug:     r.slug,
+          label:    r._getLabel(),
+          singular: r._getLabelSingular(),
+          icon:     r.icon,
+          canView:  r.hasPermission(req.adminUser || null, 'view'),
+          index:    idx + 1,
+          category: isAuthResource(r) ? 'auth' : 'app',
+        })),
       flash:          extra._flash || {},
       activePage:     extra.activePage || null,
       activeResource: extra.activeResource || null,
@@ -258,15 +360,12 @@ class Admin {
 
   async _loginPage(req, res) {
     // Already logged in → redirect to dashboard
-    if (AdminAuth.enabled) {
-      const cookies = req.headers.cookie || '';
-      if (cookies.includes(this._config.auth?.cookieName || 'millas_admin')) {
-        // Let AdminAuth verify properly
-      }
+    if (AdminAuth.enabled && AdminAuth._getSession(req)) {
+      return res.redirect((req.query.next && decodeURIComponent(req.query.next)) || this._config.prefix + '/');
     }
 
     const flash = AdminAuth.getFlash(req, res);
-    res.render('pages/login.njk', {
+    return this._render(req, res, 'pages/login.njk', {
       adminTitle:  this._config.title,
       adminPrefix: this._config.prefix,
       flash,
@@ -292,7 +391,7 @@ class Admin {
 
       res.redirect(next || prefix + '/');
     } catch (err) {
-      res.render('pages/login.njk', {
+      return this._render(req, res, 'pages/login.njk', {
         adminTitle:  this._config.title,
         adminPrefix: prefix,
         flash:       {},
@@ -344,10 +443,12 @@ class Admin {
         })
       );
 
-      const activityData   = ActivityLog.recent(25);
-      const activityTotals = ActivityLog.totals();
+      const [activityData, activityTotals] = await Promise.all([
+        ActivityLog.recent(25),
+        ActivityLog.totals(),
+      ]);
 
-      res.render('pages/dashboard.njk', this._ctxWithFlash(req, res, {
+      return this._render(req, res, 'pages/dashboard.njk', this._ctxWithFlash(req, res, {
         pageTitle:       'Dashboard',
         activePage:      'dashboard',
         resources:       resourceData,
@@ -355,7 +456,7 @@ class Admin {
         activityTotals,
       }));
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -364,15 +465,17 @@ class Admin {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
 
-      const page    = Number(req.query.page)   || 1;
-      const search  = req.query.search         || '';
-      const sort    = req.query.sort           || 'id';
-      const order   = req.query.order          || 'desc';
-      const perPage = Number(req.query.perPage) || R.perPage;
-      const year    = req.query.year  || null;
-      const month   = req.query.month || null;
+      // Parse query params
+      const query = {
+        page:   Number(req.query.page)    || 1,
+        search: req.query.search          || '',
+        sort:   req.query.sort            || 'id',
+        order:  req.query.order           || 'desc',
+        perPage:Number(req.query.perPage)  || R.perPage,
+        year:   req.query.year            || null,
+        month:  req.query.month           || null,
+      };
 
-      // Collect active filters
       const activeFilters = {};
       if (req.query.filter) {
         for (const [k, v] of Object.entries(req.query.filter)) {
@@ -380,48 +483,23 @@ class Admin {
         }
       }
 
-      const result = await R.fetchList({ page, search, sort, order, perPage, filters: activeFilters, year, month });
+      const result = await R.fetchList({ ...query, filters: activeFilters });
       const rows   = result.data.map(r => r.toJSON ? r.toJSON() : r);
 
-      const listFields = R.fields()
-        .filter(f => !f._hidden && !f._detailOnly)
-        .map(f => f.toJSON());
+      const perms = {
+        canCreate: this._perm(R, 'add',    req.adminUser),
+        canEdit:   this._perm(R, 'change', req.adminUser),
+        canDelete: this._perm(R, 'delete', req.adminUser),
+        canView:   this._perm(R, 'view',   req.adminUser),
+      };
 
-      res.render('pages/list.njk', this._ctxWithFlash(req, res, {
-        pageTitle:     R._getLabel(),
-        activeResource: req.params.resource,
-        resource: {
-          slug:             R.slug,
-          label:            R._getLabel(),
-          singular:         R._getLabelSingular(),
-          icon:             R.icon,
-          canCreate:        R.canCreate,
-          canEdit:          R.canEdit,
-          canDelete:        R.canDelete,
-          canView:          R.canView,
-          actions:          (R.actions || []).map((a, i) => ({ ...a, index: i, handler: undefined })),
-          rowActions:       R.rowActions || [],
-          listDisplayLinks: R.listDisplayLinks || [],
-          dateHierarchy:    R.dateHierarchy || null,
-          prepopulatedFields: R.prepopulatedFields || {},
-        },
-        rows,
-        listFields,
-        filters:      R.filters().map(f => f.toJSON()),
-        activeFilters,
-        sortable:     R.sortable || [],
-        total:        result.total,
-        page:         result.page,
-        perPage:      result.perPage,
-        lastPage:     result.lastPage,
-        search,
-        sort,
-        order,
-        year,
-        month,
-      }));
+      return this._render(req, res, 'pages/list.njk',
+        ViewContext.list(R, {
+          rows, result, query, activeFilters, perms,
+          baseCtx: this._ctxWithFlash(req, res, {}),
+        }), R);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -429,20 +507,15 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canCreate) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'add', req.adminUser)) return res.status(403).send('You do not have permission to add ${R._getLabelSingular()} records.');
 
-      res.render('pages/form.njk', this._ctxWithFlash(req, res, {
-        pageTitle:     `New ${R._getLabelSingular()}`,
-        activeResource: req.params.resource,
-        resource: { slug: R.slug, label: R._getLabel(), singular: R._getLabelSingular(), icon: R.icon, canDelete: false },
-        formFields:  this._formFields(R),
-        formAction:  `${this._config.prefix}/${R.slug}`,
-        isEdit:      false,
-        record:      {},
-        errors:      {},
-      }));
+      return this._render(req, res, 'pages/form.njk',
+        ViewContext.create(R, {
+          adminPrefix: this._config.prefix,
+          baseCtx:     this._ctxWithFlash(req, res, {}),
+        }), R);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -450,10 +523,11 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canCreate) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'add', req.adminUser)) return res.status(403).send('You do not have permission to add ${R._getLabelSingular()} records.');
+      if (!this._verifyCsrf(req, res)) return;
 
-      const record = await R.create(req.body);
-      ActivityLog.record('create', R.slug, record?.id, `New ${R._getLabelSingular()}`);
+      const record = await R.create(req.body, { user: req.adminUser, resource: R });
+      ActivityLog.record('create', R.slug, record?.id, `New ${R._getLabelSingular()}`, req.adminUser);
 
       const submit = req.body._submit || 'save';
       if (submit === 'continue' && record?.id) {
@@ -470,18 +544,15 @@ class Admin {
     } catch (err) {
       if (err.status === 422) {
         const R = this._resources.get(req.params.resource);
-        return res.render('pages/form.njk', this._ctxWithFlash(req, res, {
-          pageTitle:  `New ${R._getLabelSingular()}`,
-          activeResource: req.params.resource,
-          resource: { slug: R.slug, label: R._getLabel(), singular: R._getLabelSingular(), icon: R.icon, canDelete: false },
-          formFields: this._formFields(R),
-          formAction: `${this._config.prefix}/${R.slug}`,
-          isEdit:     false,
-          record:     req.body,
-          errors:     err.errors || {},
-        }));
+        return this._render(req, res, 'pages/form.njk',
+          ViewContext.create(R, {
+            adminPrefix: this._config.prefix,
+            record:      req.body,
+            errors:      err.errors || {},
+            baseCtx:     this._ctxWithFlash(req, res, {}),
+          }), R);
       }
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -489,23 +560,21 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canEdit) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'change', req.adminUser)) return res.status(403).send('You do not have permission to change ${R._getLabelSingular()} records.');
 
       const record = await R.fetchOne(req.params.id);
       const data   = record.toJSON ? record.toJSON() : record;
 
-      res.render('pages/form.njk', this._ctxWithFlash(req, res, {
-        pageTitle:     `Edit ${R._getLabelSingular()} #${req.params.id}`,
-        activeResource: req.params.resource,
-        resource: { slug: R.slug, label: R._getLabel(), singular: R._getLabelSingular(), icon: R.icon, canDelete: R.canDelete },
-        formFields:  this._formFields(R),
-        formAction:  `${this._config.prefix}/${R.slug}/${req.params.id}`,
-        isEdit:      true,
-        record:      data,
-        errors:      {},
-      }));
+      return this._render(req, res, 'pages/form.njk',
+        ViewContext.edit(R, {
+          adminPrefix: this._config.prefix,
+          id:          req.params.id,
+          record:      data,
+          canDelete:   this._perm(R, 'delete', req.adminUser),
+          baseCtx:     this._ctxWithFlash(req, res, {}),
+        }), R);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -513,13 +582,14 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canEdit) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'change', req.adminUser)) return res.status(403).send('You do not have permission to change ${R._getLabelSingular()} records.');
+      if (!this._verifyCsrf(req, res)) return;
 
       // Support method override
       const method = req.body._method || 'POST';
       if (method === 'PUT' || method === 'POST') {
-        await R.update(req.params.id, req.body);
-        ActivityLog.record('update', R.slug, req.params.id, `${R._getLabelSingular()} #${req.params.id}`);
+        await R.update(req.params.id, req.body, { user: req.adminUser, resource: R });
+        ActivityLog.record('update', R.slug, req.params.id, `${R._getLabelSingular()} #${req.params.id}`, req.adminUser);
 
         const submit = req.body._submit || 'save';
         if (submit === 'continue') {
@@ -533,18 +603,17 @@ class Admin {
     } catch (err) {
       if (err.status === 422) {
         const R = this._resources.get(req.params.resource);
-        return res.render('pages/form.njk', this._ctxWithFlash(req, res, {
-          pageTitle:  `Edit ${R._getLabelSingular()} #${req.params.id}`,
-          activeResource: req.params.resource,
-          resource: { slug: R.slug, label: R._getLabel(), singular: R._getLabelSingular(), icon: R.icon, canDelete: R.canDelete },
-          formFields: this._formFields(R),
-          formAction: `${this._config.prefix}/${R.slug}/${req.params.id}`,
-          isEdit:     true,
-          record:     { id: req.params.id, ...req.body },
-          errors:     err.errors || {},
-        }));
+        return this._render(req, res, 'pages/form.njk',
+          ViewContext.edit(R, {
+            adminPrefix: this._config.prefix,
+            id:          req.params.id,
+            record:      { id: req.params.id, ...req.body },
+            canDelete:   this._perm(R, 'delete', req.adminUser),
+            errors:      err.errors || {},
+            baseCtx:     this._ctxWithFlash(req, res, {}),
+          }), R);
       }
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -552,14 +621,15 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canDelete) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'delete', req.adminUser)) return res.status(403).send('You do not have permission to delete ${R._getLabelSingular()} records.');
+      if (!this._verifyCsrf(req, res)) return;
 
-      await R.destroy(req.params.id);
-      ActivityLog.record('delete', R.slug, req.params.id, `${R._getLabelSingular()} #${req.params.id}`);
+      await R.destroy(req.params.id, { user: req.adminUser, resource: R });
+      ActivityLog.record('delete', R.slug, req.params.id, `${R._getLabelSingular()} #${req.params.id}`, req.adminUser);
       this._flash(req, 'success', `${R._getLabelSingular()} deleted`);
       this._redirectWithFlash(res, `${this._config.prefix}/${R.slug}`, req._flashType, req._flashMessage);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -569,49 +639,36 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canView) {
-        if (R.canEdit) return res.redirect(`${this._config.prefix}/${R.slug}/${req.params.id}/edit`);
-        return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'view', req.adminUser)) {
+        if (this._perm(R, 'change', req.adminUser)) return res.redirect(`${this._config.prefix}/${R.slug}/${req.params.id}/edit`);
+        return res.status(403).send('You do not have permission to view ${R._getLabelSingular()} records.');
       }
 
       const record = await R.fetchOne(req.params.id);
       const data   = record.toJSON ? record.toJSON() : record;
 
-      const detailFields = R.fields()
-        .filter(f => f._type !== '__tab__' && f._type !== 'fieldset' && !f._hidden && !f._listOnly)
-        .map(f => f.toJSON());
-
-      const tabs = this._buildTabs(R.fields());
-
       // Load inline related records
       const inlineData = await Promise.all(
-        (R.inlines || []).map(async (inline) => {
+        (R.inlines || []).map(async (inline, idx) => {
           const rows = await inline.fetchRows(data[R.model.primaryKey || 'id']);
-          return { ...inline.toJSON(), rows };
+          return { ...inline.toJSON(), rows, inlineIndex: idx };
         })
       );
 
-      res.render('pages/detail.njk', this._ctxWithFlash(req, res, {
-        pageTitle:      `${R._getLabelSingular()} #${req.params.id}`,
-        activeResource: req.params.resource,
-        resource: {
-          slug:       R.slug,
-          label:      R._getLabel(),
-          singular:   R._getLabelSingular(),
-          icon:       R.icon,
-          canEdit:    R.canEdit,
-          canDelete:  R.canDelete,
-          canCreate:  R.canCreate,
-          rowActions: R.rowActions || [],
-        },
-        record:      data,
-        detailFields,
-        tabs,
-        hasTabs:     tabs.length > 1,
-        inlines:     inlineData,
-      }));
+      return this._render(req, res, 'pages/detail.njk',
+        ViewContext.detail(R, {
+          id:         req.params.id,
+          record:     data,
+          inlineData,
+          perms: {
+            canEdit:   this._perm(R, 'change', req.adminUser),
+            canDelete: this._perm(R, 'delete', req.adminUser),
+            canCreate: this._perm(R, 'add',    req.adminUser),
+          },
+          baseCtx: this._ctxWithFlash(req, res, {}),
+        }), R);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -621,7 +678,8 @@ class Admin {
     try {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
-      if (!R.canDelete) return res.status(403).send('Not allowed');
+      if (!this._perm(R, 'delete', req.adminUser)) return res.status(403).send('You do not have permission to delete ${R._getLabelSingular()} records.');
+      if (!this._verifyCsrf(req, res)) return;
 
       const ids = Array.isArray(req.body.ids) ? req.body.ids : [req.body.ids].filter(Boolean);
       if (!ids.length) {
@@ -630,11 +688,11 @@ class Admin {
       }
 
       await R.model.destroy(...ids);
-      ActivityLog.record('delete', R.slug, null, `${ids.length} ${R._getLabel()} (bulk)`);
+      ActivityLog.record('delete', R.slug, null, `${ids.length} ${R._getLabel()} (bulk)`, req.adminUser);
       this._flash(req, 'success', `Deleted ${ids.length} record${ids.length > 1 ? 's' : ''}.`);
       this._redirectWithFlash(res, `${this._config.prefix}/${R.slug}`, req._flashType, req._flashMessage);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -645,6 +703,7 @@ class Admin {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
 
+      if (!this._verifyCsrf(req, res)) return;
       const actionIndex = Number(req.body.actionIndex);
       const ids = Array.isArray(req.body.ids) ? req.body.ids : [req.body.ids].filter(Boolean);
       const action = (R.actions || [])[actionIndex];
@@ -660,11 +719,11 @@ class Admin {
       }
 
       await action.handler(ids, R.model);
-      ActivityLog.record('update', R.slug, null, `Bulk action "${action.label}" on ${ids.length} records`);
+      ActivityLog.record('update', R.slug, null, `Bulk action "${action.label}" on ${ids.length} records`, req.adminUser);
       this._flash(req, 'success', `Action "${action.label}" applied to ${ids.length} record${ids.length > 1 ? 's' : ''}.`);
       this._redirectWithFlash(res, `${this._config.prefix}/${R.slug}`, req._flashType, req._flashMessage);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -675,6 +734,7 @@ class Admin {
       const R = this._resolve(req.params.resource, res);
       if (!R) return;
 
+      if (!this._verifyCsrf(req, res)) return;
       const actionName = req.params.action;
       const rowAction  = (R.rowActions || []).find(a => a.action === actionName);
 
@@ -690,11 +750,199 @@ class Admin {
         ? result
         : `${this._config.prefix}/${R.slug}`;
 
-      ActivityLog.record('update', R.slug, req.params.id, `Action "${rowAction.label}" on #${req.params.id}`);
+      ActivityLog.record('update', R.slug, req.params.id, `Action "${rowAction.label}" on #${req.params.id}`, req.adminUser);
       this._flash(req, 'success', rowAction.successMessage || `Action "${rowAction.label}" completed.`);
       this._redirectWithFlash(res, redirect, req._flashType, req._flashMessage);
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
+    }
+  }
+
+  // ─── Relationship API ────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/api/:resource/options?q=search&limit=20
+   *
+   * Returns a JSON array of { id, label } objects for use by FK and M2M
+   * widgets in autocomplete selects. The label is derived from the first
+   * searchable column on the resource, or falls back to the primary key.
+   *
+   * Called by the frontend widget via fetch() — no page reload needed.
+   */
+  async _apiOptions(req, res) {
+    try {
+      // Look up resource by slug first, then fall back to table name.
+      // fkResource on a field is the table name (e.g. 'users') which usually
+      // matches the resource slug — but if the developer registered with a
+      // custom label the slug may differ. Table-name fallback catches that.
+      const slug = req.params.resource;
+      let R = this._resources.get(slug);
+      if (!R) {
+        // Fall back: find a resource whose model.table matches the slug
+        for (const resource of this._resources.values()) {
+          if (resource.model && resource.model.table === slug) { R = resource; break; }
+        }
+      }
+      if (!R) return res.status(404).json({ error: `Resource "${slug}" not found` });
+      if (!R.hasPermission(req.adminUser || null, 'view')) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const search  = (req.query.q    || '').trim();
+      const page    = Math.max(1, Number(req.query.page)  || 1);
+      const perPage = Math.min(Number(req.query.limit) || 20, 100);
+      const offset  = (page - 1) * perPage;
+
+      const pk = R.model.primaryKey || 'id';
+
+      // Label column resolution — priority order:
+      //   1. resource.fkLabel explicitly set (developer override)
+      //   2. resource.searchable[0] — first searchable column
+      //   3. Auto-detect from model fields: name > email > title > label > first string field
+      //   4. pk as last resort (gives id as label which is unhelpful but safe)
+      let labelCol = R.fkLabel || (R.searchable && R.searchable[0]) || null;
+      if (!labelCol && R.model) {
+        const fields = typeof R.model.getFields === 'function'
+          ? R.model.getFields()
+          : (R.model.fields || {});
+        const preferred = ['name', 'email', 'title', 'label', 'full_name',
+                           'fullname', 'username', 'display_name', 'first_name'];
+        for (const p of preferred) {
+          if (fields[p]) { labelCol = p; break; }
+        }
+        if (!labelCol) {
+          // First string field that isn't a password/token
+          const skip = new Set(['password', 'token', 'secret', 'hash', 'remember_token']);
+          for (const [col, def] of Object.entries(fields)) {
+            if (def.type === 'string' && !skip.has(col) && col !== pk) {
+              labelCol = col; break;
+            }
+          }
+        }
+      }
+      labelCol = labelCol || pk;
+
+      // Resolve fkWhere — look up the field on the SOURCE resource (the one
+      // that owns the FK field), not the target resource being queried.
+      // e.g. TenantOwnershipResource.tenant_id has .where({ role: 'tenant' })
+      //      but we're currently querying UserResource — wrong place to look.
+      const fieldName  = (req.query.field || '').trim();
+      const fromSlug   = (req.query.from  || '').trim();
+      let fkWhere = null;
+      if (fieldName && fromSlug) {
+        const sourceResource = this._resources.get(fromSlug)
+          || [...this._resources.values()].find(r => r.model?.table === fromSlug);
+        if (sourceResource) {
+          const fieldDef = (sourceResource.fields() || []).find(f => f._name === fieldName);
+          if (fieldDef && fieldDef._fkWhere) fkWhere = fieldDef._fkWhere;
+        }
+      }
+
+      // Helper: apply fkWhere constraints to a knex query builder.
+      // Plain object keys are run through LookupParser so __ syntax works:
+      //   { role: 'tenant' }            → WHERE role = 'tenant'
+      //   { age__gte: 18 }              → WHERE age >= 18
+      //   { role__in: ['a','b'] }       → WHERE role IN ('a','b')
+      //   { name__icontains: 'alice' }  → WHERE name ILIKE '%alice%'
+      const applyScope = (q) => {
+        if (!fkWhere) return q;
+        if (typeof fkWhere === 'function') return fkWhere(q) || q;
+        // Plain object — run each key through LookupParser for __ support
+        for (const [key, value] of Object.entries(fkWhere)) {
+          LookupParser.apply(q, key, value, R.model);
+        }
+        return q;
+      };
+
+      // Call _db() separately for each query — knex builders are mutable,
+      // reusing the same instance across count + select corrupts both queries.
+      let countQ = applyScope(R.model._db().count(`${pk} as total`));
+      if (search) countQ = countQ.where(labelCol, 'like', `%${search}%`);
+      const [{ total }] = await countQ;
+
+      let rowQ = applyScope(R.model._db()
+        .select([`${pk} as id`, `${labelCol} as label`])
+        .orderBy(labelCol, 'asc')
+        .limit(perPage)
+        .offset(offset));
+      if (search) rowQ = rowQ.where(labelCol, 'like', `%${search}%`);
+      const rows = await rowQ;
+
+      return res.json({
+        data:     rows,
+        total:    Number(total),
+        page,
+        perPage,
+        hasMore:  offset + rows.length < Number(total),
+        labelCol,   // lets the frontend show "Search by <field>…" in the placeholder
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ─── Inline CRUD ──────────────────────────────────────────────────────────────
+
+  /**
+   * POST /admin/:resource/:id/inline/:inlineIndex
+   *
+   * Create a new inline related record.
+   * The inlineIndex identifies which AdminInline in R.inlines[] to use.
+   */
+  async _inlineStore(req, res) {
+    try {
+      const R = this._resolve(req.params.resource, res);
+      if (!R) return;
+      if (!this._verifyCsrf(req, res)) return;
+
+      const idx    = Number(req.params.inlineIndex);
+      const inline = (R.inlines || [])[idx];
+      if (!inline) return res.status(404).send('Inline not found.');
+      if (!inline.canCreate) return res.status(403).send('Inline create is disabled.');
+
+      // Inject the FK value from the parent record ID
+      const data = {
+        ...req.body,
+        [inline.foreignKey]: req.params.id,
+      };
+      // Strip system fields
+      delete data._csrf;
+      delete data._method;
+      delete data._submit;
+
+      await inline.model.create(data);
+      ActivityLog.record('create', inline.label, null, `Inline ${inline.label} for #${req.params.id}`, req.adminUser);
+
+      AdminAuth.setFlash(res, 'success', `${inline.label} added.`);
+      res.redirect(`${this._config.prefix}/${R.slug}/${req.params.id}`);
+    } catch (err) {
+      this._error(req, res, err);
+    }
+  }
+
+  /**
+   * POST /admin/:resource/:id/inline/:inlineIndex/:rowId/delete
+   *
+   * Delete an inline related record.
+   */
+  async _inlineDestroy(req, res) {
+    try {
+      const R = this._resolve(req.params.resource, res);
+      if (!R) return;
+      if (!this._verifyCsrf(req, res)) return;
+
+      const idx    = Number(req.params.inlineIndex);
+      const inline = (R.inlines || [])[idx];
+      if (!inline) return res.status(404).send('Inline not found.');
+      if (!inline.canDelete) return res.status(403).send('Inline delete is disabled.');
+
+      await inline.model.destroy(req.params.rowId);
+      ActivityLog.record('delete', inline.label, req.params.rowId, `Inline ${inline.label} #${req.params.rowId}`, req.adminUser);
+
+      AdminAuth.setFlash(res, 'success', 'Record deleted.');
+      res.redirect(`${this._config.prefix}/${R.slug}/${req.params.id}`);
+    } catch (err) {
+      this._error(req, res, err);
     }
   }
 
@@ -703,13 +951,11 @@ class Admin {
       const q = (req.query.q || '').trim();
 
       if (!q) {
-        return res.render('pages/search.njk', this._ctxWithFlash(req, res, {
-          pageTitle: 'Search',
-          activePage: 'search',
-          query: '',
-          results: [],
-          total: 0,
-        }));
+        return this._render(req, res, 'pages/search.njk',
+          ViewContext.search({
+            query: '', results: [], total: 0,
+            baseCtx: this._ctxWithFlash(req, res, { activePage: 'search' }),
+          }));
       }
 
       const results = await Promise.all(
@@ -737,15 +983,13 @@ class Admin {
       const filtered = results.filter(Boolean);
       const total    = filtered.reduce((s, r) => s + r.total, 0);
 
-      res.render('pages/search.njk', this._ctxWithFlash(req, res, {
-        pageTitle:  `Search: ${q}`,
-        activePage: 'search',
-        query:      q,
-        results:    filtered,
-        total,
-      }));
+      return this._render(req, res, 'pages/search.njk',
+        ViewContext.search({
+          query: q, results: filtered, total,
+          baseCtx: this._ctxWithFlash(req, res, { activePage: 'search' }),
+        }));
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -801,7 +1045,7 @@ class Admin {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
       res.send([header, ...csvRows].join('\r\n'));
     } catch (err) {
-      this._error(res, err);
+      this._error(req, res, err);
     }
   }
 
@@ -846,7 +1090,6 @@ class Admin {
 
       result.push(json);
     }
-
     return result;
   }
 
@@ -879,6 +1122,78 @@ class Admin {
     return tabs;
   }
 
+  /**
+   * Resolve a permission for a resource + user combination.
+   * Single chokepoint — every action gate calls this.
+   *
+   * @param {class}  R      — AdminResource subclass
+   * @param {string} action — 'view'|'add'|'change'|'delete'
+   * @param {object} user   — req.adminUser (may be null if auth disabled)
+   */
+  _perm(R, action, user) {
+    return R.hasPermission(user || null, action);
+  }
+
+  /**
+   * Verify the CSRF token on a mutating request.
+   * Checks both req.body._csrf and the X-CSRF-Token header.
+   * Returns true if auth is disabled (non-browser clients).
+   */
+  /**
+   * Render a template with before_render / after_render hooks.
+   *
+   * Replaces direct res.render() calls in every page handler so hooks
+   * can inject extra template data or react after a page is sent.
+   *
+   * @param {object} req
+   * @param {object} res
+   * @param {string} template  — e.g. 'pages/list.njk'
+   * @param {object} ctx       — template data
+   * @param {class}  Resource  — AdminConfig subclass (may be null for auth pages)
+   */
+  async _render(req, res, template, ctx, Resource = null) {
+    const start = Date.now();
+
+    // ── before_render ──────────────────────────────────────────────────
+    let finalCtx = ctx;
+    try {
+      const hookCtx = await HookPipeline.run(
+        'before_render',
+        { view: template, templateCtx: ctx, user: req.adminUser || null, resource: Resource },
+        Resource,
+        AdminHooks,
+      );
+      finalCtx = hookCtx.templateCtx || ctx;
+    } catch (err) {
+      // before_render errors abort the render — surface as a 500
+      return this._error(req, res, err);
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    res.render(template, finalCtx);
+
+    // ── after_render (fire-and-forget) ───────────────────────────────────
+    setImmediate(() => {
+      HookPipeline.run(
+        'after_render',
+        { view: template, user: req.adminUser || null, resource: Resource, ms: Date.now() - start },
+        Resource,
+        AdminHooks,
+      ).catch(err => {
+        process.stderr.write(`[AdminHooks] after_render error: ${err.message}
+`);
+      });
+    });
+  }
+
+  _verifyCsrf(req, res) {
+    if (!AdminAuth.enabled) return true;
+    const token = req.body?._csrf || req.headers['x-csrf-token'];
+    if (AdminAuth.verifyCsrf(req, token)) return true;
+    res.status(403).send('CSRF token missing or invalid. Please reload the page and try again.');
+    return false;
+  }
+
   _resolve(slug, res) {
     const R = this._resources.get(slug);
     if (!R) {
@@ -888,25 +1203,27 @@ class Admin {
     return R;
   }
 
-  _error(res, err) {
-    const status = err.status || 500;
-    res.status(status).send(`
-      <html><body style="font-family:'DM Sans',system-ui,sans-serif;padding:48px;background:#f4f5f7;color:#111827">
-        <div style="max-width:640px;margin:0 auto">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
-            <div style="width:36px;height:36px;background:#fef2f2;border-radius:8px;display:flex;align-items:center;justify-content:center">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <h2 style="font-size:17px;font-weight:600;color:#dc2626">Admin Error ${status}</h2>
-          </div>
-          <pre style="background:#fff;border:1px solid #e3e6ec;padding:20px;border-radius:8px;color:#374151;font-size:12.5px;overflow-x:auto;line-height:1.6">${err.stack || err.message}</pre>
-          <a href="javascript:history.back()" style="display:inline-flex;align-items:center;gap:6px;margin-top:16px;color:#2563eb;font-size:13px;text-decoration:none">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-            Go back
-          </a>
-        </div>
-      </body></html>
-    `);
+  _error(req, res, err) {
+    const status  = err.status || 500;
+    const is404   = status === 404;
+    const title   = is404 ? 'Not found' : `Error ${status}`;
+    const message = err.message || 'An unexpected error occurred.';
+    const stack   = process.env.NODE_ENV !== 'production' && !is404 ? (err.stack || '') : '';
+
+    try {
+      const ctx = this._ctxWithFlash(req, res, {
+        pageTitle:   title,
+        errorStatus: status,
+        errorTitle:  title,
+        errorMsg:    message,
+        errorStack:  stack,
+      });
+      res.status(status);
+      return this._render(req, res, 'pages/error.njk', ctx);
+    } catch (_renderErr) {
+      // Fallback if template itself fails
+      res.status(status).send(`<pre>${message}</pre>`);
+    }
   }
 
   // ─── Flash (cookie-based) ─────────────────────────────────────────────────

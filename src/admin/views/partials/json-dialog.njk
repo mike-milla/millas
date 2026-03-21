@@ -1,0 +1,80 @@
+{#
+  partials/json-dialog.njk  — Phase 6
+  Adds undo/redo buttons in the toolbar.
+#}
+<div id="je-dialog-content" style="display:none">
+
+  {# Toolbar #}
+  <div class="je-toolbar">
+    <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+      <span class="je-toolbar-title" id="je-title">JSON</span>
+      <div id="je-root-type-wrap" class="je-root-type-wrap"></div>
+    </div>
+    <div class="je-toolbar-right">
+
+      {# Phase 6: undo / redo buttons #}
+      <div class="je-undo-wrap">
+        <button type="button" class="je-btn-icon" id="je-undo-btn"
+          onclick="JsonEditor._undo()" title="Undo (Ctrl+Z)" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 14 4 9 9 4"/>
+            <path d="M20 20v-7a4 4 0 00-4-4H4"/>
+          </svg>
+        </button>
+        <button type="button" class="je-btn-icon" id="je-redo-btn"
+          onclick="JsonEditor._redo()" title="Redo (Ctrl+Y)" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 14 20 9 15 4"/>
+            <path d="M4 20v-7a4 4 0 014-4h12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="je-view-tabs">
+        <button type="button" class="je-view-tab active" id="je-tab-pretty"
+          onclick="JsonEditor._setView('pretty')">Pretty</button>
+        <button type="button" class="je-view-tab" id="je-tab-raw"
+          onclick="JsonEditor._setView('raw')">Raw</button>
+      </div>
+      <button type="button" class="je-btn-icon" id="je-format-btn"
+        onclick="JsonEditor._format()" title="Format / beautify" style="display:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="21" y1="6" x2="3" y2="6"/>
+          <line x1="21" y1="10" x2="7" y2="10"/>
+          <line x1="21" y1="14" x2="3" y2="14"/>
+          <line x1="21" y1="18" x2="13" y2="18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {# Pretty view #}
+  <div id="je-pretty-view" class="je-pretty-view">
+    <div class="je-tree" id="je-tree"></div>
+  </div>
+
+  {# Raw view #}
+  <div id="je-raw-view" class="je-raw-view" style="display:none">
+    <textarea id="je-raw-ta" class="je-raw-ta" spellcheck="false"
+      placeholder='{"key": "value"}'></textarea>
+    <div class="je-raw-hint" id="je-raw-hint"></div>
+  </div>
+
+  {# Footer #}
+  <div class="je-footer">
+    <span class="je-count" id="je-count"></span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="JsonEditor._cancel()">Cancel</button>
+      <button type="button" class="btn btn-primary btn-sm" onclick="JsonEditor._apply()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Apply
+      </button>
+    </div>
+  </div>
+</div>

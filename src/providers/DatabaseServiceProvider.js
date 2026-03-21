@@ -21,10 +21,11 @@ class DatabaseServiceProvider extends ServiceProvider {
   }
 
   async boot(container) {
+    const basePath = container.make('basePath') || process.cwd();
     // Load the database config
     let dbConfig;
     try {
-      dbConfig = require(process.cwd() + '/config/database');
+      dbConfig = require(basePath + '/config/database');
     } catch {
       // Fallback for tests / programmatic use
       dbConfig = {

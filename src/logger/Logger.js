@@ -181,7 +181,7 @@ class Logger {
           ctx.slow = true;
         }
 
-        self._log(level, 'HTTP', `${method} ${url} ${status} ${ms}ms`, ctx);
+        self._log(level, `HTTP [${method}]`, `${url} ${status} ${ms}ms`);
       });
 
       next();

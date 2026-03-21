@@ -1,124 +1,238 @@
 'use strict';
 
-const fs   = require('fs-extra');
 const path = require('path');
+const MigrationGraph = require('./MigrationGraph');
 
 /**
  * MigrationRunner
  *
- * Handles the full migration lifecycle:
- *   - run pending migrations          (migrate)
- *   - rollback last batch             (migrate:rollback)
- *   - show status table               (migrate:status)
- *   - drop all + re-run               (migrate:fresh)
- *   - rollback all                    (migrate:reset)
- *   - rollback all + re-run           (migrate:refresh)
+ * Implements `millas migrate` and related commands.
  *
- * Migration history is tracked in the `millas_migrations` table.
- * Each migration file must export { up(db), down(db) }.
+ * Critical separation:
+ *   - NEVER generates migrations
+ *   - NEVER reads model files
+ *   - Only applies existing migration files to the database
+ *
+ * Tracking table: millas_migrations
+ *   - app_name      (source: 'system' | 'app')
+ *   - name          (migration name without .js)
+ *   - applied_at    (timestamp)
+ *   - batch         (integer, for rollback grouping)
+ *
+ * Execution order: topological sort of the DAG — dependencies always run first.
  */
 class MigrationRunner {
   /**
-   * @param {object} knexConn      — live knex connection
-   * @param {string} migrationsPath — absolute path to migrations dir
+   * @param {object} db             — live knex connection
+   * @param {string} appMigPath     — abs path to database/migrations/
+   * @param {string} systemMigPath  — abs path to millas/src/migrations/system/
    */
-  constructor(knexConn, migrationsPath) {
-    this._db   = knexConn;
-    this._path = migrationsPath;
+  constructor(db, appMigPath, systemMigPath) {
+    this._db            = db;
+    this._appMigPath    = appMigPath;
+    this._systemMigPath = systemMigPath || path.join(__dirname, '../../../migrations/system');
   }
 
-  // ─── Public commands ──────────────────────────────────────────────────────
+  // ─── Public commands ───────────────────────────────────────────────────────
 
-  /** Run all pending migrations. */
   async migrate() {
     await this._ensureTable();
-    const pending = await this._pending();
+    const graph   = this._buildGraph();
+    const applied = await this._appliedSet();
+    const pending = graph.topoSort().filter(n => !applied.has(n.key));
 
-    if (pending.length === 0) {
-      return { ran: [], message: 'Nothing to migrate.' };
-    }
+    if (pending.length === 0) return { ran: [], message: 'Nothing to migrate.' };
 
     const batch = await this._nextBatch();
     const ran   = [];
 
-    for (const file of pending) {
-      const migration = this._load(file);
-      await migration.up(this._db);
-      await this._record(file, batch);
-      ran.push(file);
+    for (const node of pending) {
+      await this._applyNode(node);
+      await this._record(node, batch);
+      ran.push({ label: node.key, source: node.source, name: node.name });
     }
 
     return { ran, batch, message: `Ran ${ran.length} migration(s).` };
   }
 
-  /** Rollback the last batch of migrations. */
   async rollback(steps = 1) {
     await this._ensureTable();
-    const batches = await this._lastBatches(steps);
+    const rows = await this._lastBatchRows(steps);
+    if (rows.length === 0) return { rolledBack: [], message: 'Nothing to rollback.' };
 
-    if (batches.length === 0) {
-      return { rolledBack: [], message: 'Nothing to rollback.' };
-    }
+    const graph       = this._buildGraph();
+    const rolledBack  = [];
 
-    const rolledBack = [];
+    // Reverse the topo order for rollback
+    const topoKeys = graph.topoSort().map(n => n.key);
+    rows.sort((a, b) => topoKeys.indexOf(`${b.app_name}:${b.name}`) - topoKeys.indexOf(`${a.app_name}:${a.name}`));
 
-    for (const row of [...batches].reverse()) {
-      const migration = this._load(row.name);
-      await migration.down(this._db);
-      await this._db('millas_migrations').where('name', row.name).delete();
-      rolledBack.push(row.name);
+    for (const row of rows) {
+      const key  = `${row.app_name}:${row.name}`;
+      const node = graph.get(key);
+      if (!node) {
+        process.stderr.write(`  ⚠  Migration "${key}" not found — skipping rollback\n`);
+        continue;
+      }
+      await this._revertNode(node);
+      await this._db('millas_migrations')
+        .where('app_name', row.app_name)
+        .where('name', row.name)
+        .delete();
+      rolledBack.push({ label: key, source: node.source, name: node.name });
     }
 
     return { rolledBack, message: `Rolled back ${rolledBack.length} migration(s).` };
   }
 
-  /** Drop all tables and re-run every migration. */
   async fresh() {
     await this._dropAllTables();
     await this._ensureTable();
     return this.migrate();
   }
 
-  /** Rollback ALL migrations. */
   async reset() {
     await this._ensureTable();
-    const all = await this._db('millas_migrations').orderBy('id', 'desc');
+    const all = await this._db('millas_migrations').select('*').orderBy('id', 'desc');
+    if (all.length === 0) return { rolledBack: [], message: 'Nothing to reset.' };
 
-    if (all.length === 0) {
-      return { rolledBack: [], message: 'Nothing to reset.' };
-    }
-
+    const graph = this._buildGraph();
     const rolledBack = [];
+
     for (const row of all) {
-      const migration = this._load(row.name);
-      await migration.down(this._db);
-      await this._db('millas_migrations').where('name', row.name).delete();
-      rolledBack.push(row.name);
+      const key  = `${row.app_name}:${row.name}`;
+      const node = graph.get(key);
+      if (node) {
+        try { await this._revertNode(node); } catch { /* already gone */ }
+      }
+      await this._db('millas_migrations')
+        .where('app_name', row.app_name).where('name', row.name).delete();
+      rolledBack.push({ label: key });
     }
 
     return { rolledBack, message: `Reset ${rolledBack.length} migration(s).` };
   }
 
-  /** Rollback all then re-run all. */
   async refresh() {
     await this.reset();
     return this.migrate();
   }
 
-  /** Return status of all migration files. */
   async status() {
     await this._ensureTable();
-    const files = this._files();
-    const ran   = await this._ranNames();
 
-    return files.map(file => ({
-      name:   file,
-      status: ran.has(file) ? 'Ran' : 'Pending',
-      batch:  ran.get(file) || null,
-    }));
+    const graph   = this._buildGraph();
+    const applied = await this._appliedMap();
+    const rows    = [];
+
+    for (const node of graph.topoSort()) {
+      const rec = applied.get(node.key);
+      rows.push({
+        key:    node.key,
+        source: node.source,
+        name:   node.name,
+        status: rec ? 'Applied' : 'Pending',
+        batch:  rec?.batch ?? null,
+        appliedAt: rec?.applied_at ?? null,
+      });
+    }
+
+    return rows;
+  }
+
+  /**
+   * Mark a migration as applied without running it (--fake).
+   */
+  async fake(source, name) {
+    await this._ensureTable();
+    const key = `${source}:${name}`;
+    const already = await this._db('millas_migrations')
+      .where('app_name', source).where('name', name).first();
+    if (already) throw new Error(`Migration "${key}" is already applied.`);
+    const batch = await this._nextBatch();
+    await this._record({ source, name }, batch);
+    return { key };
+  }
+
+  /**
+   * Show which migrations WOULD run (plan preview, no DB changes).
+   */
+  async plan() {
+    await this._ensureTable();
+    const graph   = this._buildGraph();
+    const applied = await this._appliedSet();
+    return graph.topoSort()
+      .filter(n => !applied.has(n.key))
+      .map(n => ({ key: n.key, source: n.source, name: n.name }));
   }
 
   // ─── Internal ─────────────────────────────────────────────────────────────
+
+  _buildGraph() {
+    const graph = new MigrationGraph()
+      .addSource('system', this._systemMigPath)
+      .addSource('app',    this._appMigPath);
+    graph.loadAll();
+    return graph;
+  }
+
+  async _applyNode(node) {
+    if (node.legacy) {
+      // Legacy up/down migration — no operations array, just call up()
+      await node.raw.up(this._db);
+      return;
+    }
+
+    const ops = node.operations || [];
+
+    // ── FK-safe two-phase execution ───────────────────────────────────────────
+    //
+    // When a migration contains multiple CreateModel ops, running them one by
+    // one with inline FK constraints fails whenever a table references another
+    // table that appears later in the op list (or in a circular relationship).
+    //
+    // Strategy:
+    //   Phase 1 — run all CreateModel ops without FK constraints
+    //             (plain integer columns only)
+    //   Phase 2 — attach all FK constraints in a single alterTable per table,
+    //             now that every referenced table is guaranteed to exist
+    //   Phase 3 — run all remaining ops (AddField, AlterField, etc.) normally
+    //
+    // This costs exactly the same number of DB round-trips as the naive approach
+    // for the common case (one CreateModel per migration = one CREATE TABLE +
+    // one ALTER TABLE if it has FKs, vs one CREATE TABLE inline). For migrations
+    // with multiple CreateModel ops it is strictly cheaper than per-op ALTER TABLE
+    // calls because FK constraints are batched per table in phase 2.
+
+    const createOps = ops.filter(op => op.type === 'CreateModel');
+    const otherOps  = ops.filter(op => op.type !== 'CreateModel');
+
+    // Phase 1: create all tables, FK columns as plain integers
+    for (const op of createOps) {
+      await op.upWithoutFKs(this._db);
+    }
+
+    // Phase 2: attach all FK constraints — one alterTable per table
+    for (const op of createOps) {
+      await op.applyFKConstraints(this._db);
+    }
+
+    // Phase 3: remaining ops (AddField, RemoveField, AlterField, RunSQL, etc.)
+    for (const op of otherOps) {
+      await op.up(this._db);
+    }
+  }
+
+  async _revertNode(node) {
+    if (node.legacy) {
+      await node.raw.down(this._db);
+    } else {
+      const ops = [...(node.operations || [])].reverse();
+      for (const op of ops) {
+        await op.down(this._db);
+      }
+    }
+  }
 
   async _ensureTable() {
     const exists = await this._db.schema.hasTable('millas_migrations');
@@ -126,21 +240,24 @@ class MigrationRunner {
 
     await this._db.schema.createTable('millas_migrations', (t) => {
       t.increments('id');
-      t.string('name').notNullable().unique();
+      t.string('app_name', 50).notNullable();
+      t.string('name', 200).notNullable();
       t.integer('batch').notNullable();
-      t.timestamp('ran_at').defaultTo(this._db.fn.now());
+      t.timestamp('applied_at').defaultTo(this._db.fn.now());
+      t.unique(['app_name', 'name']);
     });
   }
 
-  async _pending() {
-    const ran   = await this._ranNames();
-    const files = this._files();
-    return files.filter(f => !ran.has(f));
+  async _appliedSet() {
+    const rows = await this._db('millas_migrations').select('app_name', 'name');
+    return new Set(rows.map(r => `${r.app_name}:${r.name}`));
   }
 
-  async _ranNames() {
-    const rows = await this._db('millas_migrations').select('name', 'batch');
-    return new Map(rows.map(r => [r.name, r.batch]));
+  async _appliedMap() {
+    const rows = await this._db('millas_migrations').select('*');
+    const map  = new Map();
+    for (const r of rows) map.set(`${r.app_name}:${r.name}`, r);
+    return map;
   }
 
   async _nextBatch() {
@@ -148,58 +265,35 @@ class MigrationRunner {
     return (result?.max || 0) + 1;
   }
 
-  async _lastBatches(steps = 1) {
-    const maxBatch = await this._db('millas_migrations').max('batch as max').first();
-    if (!maxBatch?.max) return [];
-
-    const fromBatch = maxBatch.max - steps + 1;
-    const all = await this._db('millas_migrations').orderBy('id', 'desc');
-    return all.filter(r => r.batch >= fromBatch);
+  async _lastBatchRows(steps) {
+    const result = await this._db('millas_migrations').max('batch as max').first();
+    if (!result?.max) return [];
+    const fromBatch = result.max - steps + 1;
+    return this._db('millas_migrations')
+      .where('batch', '>=', fromBatch)
+      .orderBy('id', 'desc');
   }
 
-  /**
-   * Drop all user tables — dialect-aware.
-   * Resolves the knex client name and delegates to the right helper.
-   */
+  async _record(node, batch) {
+    await this._db('millas_migrations').insert({
+      app_name:   node.source,
+      name:       node.name,
+      batch,
+      applied_at: new Date().toISOString(),
+    });
+  }
+
   async _dropAllTables() {
     const clientName = this._db.client.config.client || 'sqlite3';
-
     let dialect;
     if (clientName.includes('pg') || clientName.includes('postgres')) {
       dialect = require('./dialects/postgres');
     } else if (clientName.includes('mysql') || clientName.includes('maria')) {
       dialect = require('./dialects/mysql');
     } else {
-      // Default: sqlite / sqlite3
       dialect = require('./dialects/sqlite');
     }
-
     await dialect.dropAllTables(this._db);
-  }
-
-  _files() {
-    if (!fs.existsSync(this._path)) return [];
-    return fs.readdirSync(this._path)
-      .filter(f => f.endsWith('.js') && !f.startsWith('.'))
-      .sort();
-  }
-
-  _load(name) {
-    const filePath = path.join(this._path, name);
-    delete require.cache[require.resolve(filePath)];
-    const migration = require(filePath);
-    if (typeof migration.up !== 'function' || typeof migration.down !== 'function') {
-      throw new Error(`Migration "${name}" must export { up(db), down(db) }`);
-    }
-    return migration;
-  }
-
-  async _record(name, batch) {
-    await this._db('millas_migrations').insert({
-      name,
-      batch,
-      ran_at: new Date().toISOString(),
-    });
   }
 }
 

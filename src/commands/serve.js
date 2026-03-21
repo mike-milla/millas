@@ -85,6 +85,7 @@ class HotReloader {
             env: {
                 ...extra,
                 MILLAS_CHILD: '1',
+                DEBUG: process.env.APP_DEBUG,
             },
             stdio: 'inherit',
         });
@@ -120,13 +121,11 @@ class HotReloader {
     }
 
     _restart(changedFile) {
-        const link = changedFile
-            ? `\x1b]8;;file://${changedFile}\x07${path.relative(process.cwd(), changedFile)}\x1b]8;;\x07`
-            : '';
+
         console.warn(
             chalk.yellow('↺') + '  ' +
             chalk.white('Reloading') +
-            (link ? chalk.blueBright('  ' + link) : '')
+            (changedFile ? chalk.blueBright('  ' + changedFile) : '')
         );
 
         this._restarts++;

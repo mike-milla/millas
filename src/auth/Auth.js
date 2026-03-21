@@ -80,7 +80,9 @@ class Auth {
     if (existing) throw new HttpError(422, 'Email already in use');
 
     const hashed = await Hasher.make(data.password);
-    return this._UserModel.create({ ...data, password: hashed });
+    // is_active defaults true — set explicitly so it is always present
+    // regardless of whether the model field has a DB default.
+    return this._UserModel.create({ is_active: true, ...data, password: hashed });
   }
 
   /**
@@ -98,8 +100,22 @@ class Auth {
     const user = await this._UserModel.findBy('email', email);
     if (!user) throw new HttpError(401, 'Invalid credentials');
 
+    // Check password before is_active — avoids leaking whether the account exists
     const ok = await Hasher.check(password, user.password);
-    if (!ok)  throw new HttpError(401, 'Invalid credentials');
+    if (!ok) throw new HttpError(401, 'Invalid credentials');
+
+    // Django: 'Please enter the correct email and password for a staff account.
+    //          Note that both fields may be case-sensitive.'
+    // Millas matches this — inactive check is after password so error message
+    // doesn't reveal which condition failed to a brute-force attacker.
+    if (user.is_active === false || user.is_active === 0) {
+      throw new HttpError(401, 'This account is inactive.');
+    }
+
+    // Record last login (fire-and-forget — never block the login response)
+    try {
+      await this._UserModel.where('id', user.id).update({ last_login: new Date().toISOString() });
+    } catch { /* non-fatal — table may not have last_login yet */ }
 
     const payload = this._buildTokenPayload(user);
     const token   = this._jwt.sign(payload);

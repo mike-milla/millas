@@ -18,7 +18,7 @@ class CacheServiceProvider extends ServiceProvider {
   async boot() {
     let cacheConfig;
     try {
-      cacheConfig = require(process.cwd() + '/config/cache');
+      cacheConfig = require((container.make('basePath') || process.cwd()) + '/config/cache');
     } catch {
       cacheConfig = {
         default: process.env.CACHE_DRIVER || 'memory',
@@ -48,7 +48,7 @@ class StorageServiceProvider extends ServiceProvider {
   async boot() {
     let storageConfig;
     try {
-      storageConfig = require(process.cwd() + '/config/storage');
+      storageConfig = require((container.make('basePath') || process.cwd()) + '/config/storage');
     } catch {
       storageConfig = {
         default: process.env.STORAGE_DRIVER || 'local',

@@ -59,6 +59,9 @@ class LogServiceProvider extends ServiceProvider {
   beforeBoot(container) {
     let config = {};
     try {
+      // Note: beforeBoot runs before any container bindings exist.
+      // basePath is not yet available — process.cwd() is the correct fallback here.
+      // The path will be correct as long as `millas serve` is run from project root.
       config = require(process.cwd() + '/config/logging');
     } catch {
       // No config file — defaults already applied in logger/index.js

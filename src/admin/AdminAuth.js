@@ -1,47 +1,56 @@
 'use strict';
 
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
 
 /**
  * AdminAuth
  *
- * Handles authentication for the Millas admin panel.
+ * Authentication for the Millas admin panel.
  *
- * Uses a signed, httpOnly cookie for sessions — no express-session
- * or database required. The cookie payload is HMAC-signed with
- * APP_KEY so it cannot be forged.
+ * ── How it works (Django parity) ─────────────────────────────────────────────
  *
- * Configuration (in Admin.configure or config/admin.js):
+ *  1. Login: find user by email in the app's User model (same table the API uses).
+ *     Check password with bcrypt. Require is_active=true AND is_staff=true.
+ *     On success, store only { id } in a signed, httpOnly cookie — never the
+ *     full user object.
+ *
+ *  2. Every request: read { id } from the cookie, call User.find(id) to get a
+ *     live user record. Attach it as req.adminUser. If the user has been
+ *     deactivated since their last request, they are immediately locked out —
+ *     no need to wait for session expiry.
+ *
+ *  3. is_staff gate: only users with is_staff=true can enter the admin.
+ *     is_superuser=true bypasses all resource-level permission checks (Phase 6).
+ *
+ * ── Configuration ────────────────────────────────────────────────────────────
  *
  *   Admin.configure({
  *     auth: {
- *       // Static user list — good for simple setups
- *       users: [
- *         { email: 'admin@example.com', password: 'plain-or-bcrypt-hash', name: 'Admin' },
- *       ],
- *
- *       // OR: use a Model — any model with email + password fields
+ *       // Optional — AdminServiceProvider resolves this automatically from
+ *       // app/models/User (falling back to the built-in AuthUser).
+ *       // Only set this if you want to override the model explicitly.
  *       model: UserModel,
  *
- *       // Cookie settings
- *       cookieName:  'millas_admin',   // default
- *       cookieMaxAge: 60 * 60 * 8,     // 8 hours (seconds), default
- *       rememberAge:  60 * 60 * 24 * 30, // 30 days when "remember me" checked
- *
- *       // Rate limiting (per IP)
- *       maxAttempts: 5,
+ *       cookieName:   'millas_admin',     // default
+ *       cookieMaxAge: 60 * 60 * 8,        // 8 hours (seconds)
+ *       rememberAge:  60 * 60 * 24 * 30,  // 30 days ("remember me")
+ *       maxAttempts:    5,
  *       lockoutMinutes: 15,
  *     }
  *   });
  *
- * Disable auth entirely:
+ * Disable auth entirely (not recommended):
  *   Admin.configure({ auth: false });
  */
 class AdminAuth {
   constructor() {
-    this._config = null;
+    this._config     = null;
+    this._UserModel  = null;  // resolved by AdminServiceProvider
+    this._basePath   = null;  // resolved by AdminServiceProvider.setBasePath()
+    this._attempts   = new Map();
   }
+
+  // ─── Configuration ────────────────────────────────────────────────────────
 
   configure(authConfig) {
     if (authConfig === false) {
@@ -50,8 +59,7 @@ class AdminAuth {
     }
 
     this._config = {
-      users:          [],
-      model:          null,
+      model:          null,   // overridden by setUserModel() or config
       cookieName:     'millas_admin',
       cookieMaxAge:   60 * 60 * 8,
       rememberAge:    60 * 60 * 24 * 30,
@@ -60,8 +68,31 @@ class AdminAuth {
       ...authConfig,
     };
 
-    // Rate limit store: Map<ip, { count, lockedUntil }>
+    // If the config block supplied an explicit model, use it
+    if (this._config.model) {
+      this._UserModel = this._config.model;
+    }
+
     this._attempts = new Map();
+  }
+
+  /**
+   * Called by AdminServiceProvider after Auth is booted.
+   * Provides the resolved User model (app/models/User or AuthUser fallback).
+   * Only applied if no explicit model was set in the auth config block.
+   */
+  setUserModel(UserModel) {
+    if (!this._UserModel) {
+      this._UserModel = UserModel;
+    }
+  }
+
+  /**
+   * Called by AdminServiceProvider to provide the project basePath.
+   * Used by _resolveUserModel() so it never calls process.cwd() at request time.
+   */
+  setBasePath(basePath) {
+    this._basePath = basePath || null;
   }
 
   /** Returns true if auth is enabled. */
@@ -72,23 +103,45 @@ class AdminAuth {
   // ─── Middleware ────────────────────────────────────────────────────────────
 
   /**
-   * Express middleware — allows the request through if the admin session
-   * cookie is valid. Redirects to the login page otherwise.
+   * Express middleware — runs before every admin route.
+   *
+   * Verifies the signed session cookie, loads the live user from DB,
+   * checks is_active + is_staff, attaches to req.adminUser.
+   * Redirects to login if any check fails.
    */
   middleware(prefix) {
-    return (req, res, next) => {
+    return async (req, res, next) => {
       if (!this.enabled) return next();
 
       const loginPath = `${prefix}/login`;
+      const p = req.path;
 
-      // Always allow login page and logout
-      if (req.path === '/login' || req.path === `${prefix}/login`) return next();
-      if (req.path === '/logout' || req.path === `${prefix}/logout`) return next();
+      // Always let login/logout through
+      if (p === '/login' || p === '/logout') return next();
 
-      const user = this._getSession(req);
-      if (!user) {
+      const session = this._getSession(req);
+      if (!session) {
         const returnTo = encodeURIComponent(req.originalUrl);
         return res.redirect(`${loginPath}?next=${returnTo}`);
+      }
+
+      // Live user lookup — deactivated users are locked out immediately
+      const user = await this._loadUser(session.id);
+      if (!user) {
+        this._clearSessionCookie(res);
+        return res.redirect(`${loginPath}?next=${encodeURIComponent(req.originalUrl)}`);
+      }
+
+      if (!user.is_active) {
+        this._clearSessionCookie(res);
+        this.setFlash(res, 'error', 'This account is inactive.');
+        return res.redirect(loginPath);
+      }
+
+      if (!user.is_staff) {
+        this._clearSessionCookie(res);
+        this.setFlash(res, 'error', 'You do not have staff access to this admin.');
+        return res.redirect(loginPath);
       }
 
       req.adminUser = user;
@@ -96,59 +149,74 @@ class AdminAuth {
     };
   }
 
-  // ─── Login ─────────────────────────────────────────────────────────────────
+  // ─── Login ────────────────────────────────────────────────────────────────
 
   /**
    * Attempt to log in with email + password.
-   * Returns the user object on success, throws on failure.
+   * Enforces is_active + is_staff. Throws on failure.
+   * On success, writes a signed session cookie containing only { id }.
    */
   async login(req, res, { email, password, remember = false }) {
-    if (!this.enabled) return { email: 'admin', name: 'Admin' };
+    if (!this.enabled) return null;
 
     const ip = req.ip || req.connection?.remoteAddress || 'unknown';
     this._checkRateLimit(ip);
 
-    const user = await this._findUser(email);
+    const normalised = (email || '').trim().toLowerCase();
+    const user       = await this._loadUserByEmail(normalised);
 
-    if (!user || !await this._checkPassword(password, user.password)) {
+    // Always check password first — avoids leaking account existence
+    const Hasher = require('../auth/Hasher');
+    const validPassword = user ? await Hasher.check(password, user.password) : false;
+
+    if (!user || !validPassword) {
       this._recordFailedAttempt(ip);
-      throw new Error('Invalid email or password.');
+      throw new Error('Please enter the correct email and password for a staff account. Note that both fields may be case-sensitive.');
+    }
+
+    if (!user.is_active) {
+      throw new Error('This account is inactive.');
+    }
+
+    if (!user.is_staff) {
+      // Exactly what Django says
+      throw new Error('Please enter the correct email and password for a staff account. Note that both fields may be case-sensitive.');
     }
 
     this._clearAttempts(ip);
 
-    const maxAge = remember
-      ? this._config.rememberAge
-      : this._config.cookieMaxAge;
+    // Update last_login (fire-and-forget)
+    try {
+      await this._UserModel.where('id', user.id).update({ last_login: new Date().toISOString() });
+    } catch { /* non-fatal */ }
 
-    this._setSession(res, { email: user.email, name: user.name || user.email }, maxAge);
+    const maxAge = remember ? this._config.rememberAge : this._config.cookieMaxAge;
+    // Store only the PK — everything else is loaded fresh per request
+    this._setSession(res, { id: user.id }, maxAge);
 
     return user;
   }
 
   /** Destroy the admin session cookie. */
   logout(res) {
-    res.clearCookie(this._config.cookieName, { path: '/' });
+    this._clearSessionCookie(res);
   }
 
   // ─── Flash (cookie-based) ─────────────────────────────────────────────────
 
-  /** Store a flash message in a short-lived cookie. */
   setFlash(res, type, message) {
     const payload = JSON.stringify({ type, message });
     res.cookie('millas_flash', Buffer.from(payload).toString('base64'), {
       httpOnly: true,
-      maxAge:   10 * 1000, // 10 seconds — survives exactly one redirect
+      maxAge:   10 * 1000,
       path:     '/',
       sameSite: 'lax',
     });
   }
 
-  /** Read and clear the flash cookie. */
   getFlash(req, res) {
     const raw = this._parseCookies(req)['millas_flash'];
     if (!raw) return {};
-    // Clear it immediately
     res.clearCookie('millas_flash', { path: '/' });
     try {
       const { type, message } = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
@@ -156,26 +224,24 @@ class AdminAuth {
     } catch { return {}; }
   }
 
-  // ─── Session internals ────────────────────────────────────────────────────
+  // ─── Session ──────────────────────────────────────────────────────────────
 
   _setSession(res, payload, maxAge) {
-    const name = this._config.cookieName;
-    const data = Buffer.from(JSON.stringify(payload)).toString('base64');
-    const sig  = this._sign(data);
-    const value = `${data}.${sig}`;
-
-    res.cookie(name, value, {
+    const name  = this._config.cookieName;
+    const data  = Buffer.from(JSON.stringify(payload)).toString('base64');
+    const sig   = this._sign(data);
+    res.cookie(name, `${data}.${sig}`, {
       httpOnly: true,
       maxAge:   maxAge * 1000,
       path:     '/',
       sameSite: 'lax',
-      // secure: true  — uncomment in production behind HTTPS
+      // secure: true — enable in production behind HTTPS
     });
   }
 
   _getSession(req) {
-    const name  = this._config.cookieName;
-    const raw   = this._parseCookies(req)[name];
+    const name = this._config?.cookieName || 'millas_admin';
+    const raw  = this._parseCookies(req)[name];
     if (!raw) return null;
 
     const dot = raw.lastIndexOf('.');
@@ -183,7 +249,6 @@ class AdminAuth {
 
     const data = raw.slice(0, dot);
     const sig  = raw.slice(dot + 1);
-
     if (sig !== this._sign(data)) return null;
 
     try {
@@ -191,87 +256,137 @@ class AdminAuth {
     } catch { return null; }
   }
 
+  _clearSessionCookie(res) {
+    const name = this._config?.cookieName || 'millas_admin';
+    res.clearCookie(name, { path: '/' });
+  }
+
   _sign(data) {
     const secret = process.env.APP_KEY || 'millas-admin-secret-change-me';
     return crypto.createHmac('sha256', secret).update(data).digest('hex').slice(0, 32);
   }
 
+  // ─── CSRF ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Generate a CSRF token tied to the current session.
+   * Token = HMAC(sessionId + timestamp_hour) so it rotates hourly
+   * but stays valid for the full hour — no per-request token storage needed.
+   *
+   * @param {object} req
+   * @returns {string}
+   */
+  csrfToken(req) {
+    const session = this._getSession(req);
+    const hourSlot = Math.floor(Date.now() / (1000 * 60 * 60)); // changes every hour
+    const payload  = `csrf:${session?.id || 'anon'}:${hourSlot}`;
+    return this._sign(payload);
+  }
+
+  /**
+   * Verify a CSRF token submitted with a form.
+   * Accepts tokens from the current hour OR the previous hour (grace period).
+   *
+   * @param {object} req
+   * @param {string} token — value from req.body._csrf or X-CSRF-Token header
+   * @returns {boolean}
+   */
+  verifyCsrf(req, token) {
+    if (!token) return false;
+    const session  = this._getSession(req);
+    const hourSlot = Math.floor(Date.now() / (1000 * 60 * 60));
+    // Check current hour and previous hour (grace period for forms submitted near the boundary)
+    for (const slot of [hourSlot, hourSlot - 1]) {
+      const payload  = `csrf:${session?.id || 'anon'}:${slot}`;
+      if (token === this._sign(payload)) return true;
+    }
+    return false;
+  }
+
   _parseCookies(req) {
-    const header = req.headers.cookie || '';
     const result = {};
-    for (const part of header.split(';')) {
+    for (const part of (req.headers.cookie || '').split(';')) {
       const [k, ...v] = part.trim().split('=');
       if (k) result[k.trim()] = decodeURIComponent(v.join('='));
     }
     return result;
   }
 
-  // ─── User lookup ──────────────────────────────────────────────────────────
+  // ─── User loading ──────────────────────────────────────────────────────────
 
-  async _findUser(email) {
-    const cfg = this._config;
-    const normalised = (email || '').trim().toLowerCase();
-
-    // Model-based lookup
-    if (cfg.model) {
-      try {
-        return await cfg.model.findBy('email', normalised);
-      } catch { return null; }
-    }
-
-    // Static user list
-    if (cfg.users && cfg.users.length) {
-      return cfg.users.find(u =>
-        (u.email || '').trim().toLowerCase() === normalised
-      ) || null;
-    }
-
-    return null;
+  /**
+   * Load a user by PK. Returns null if not found or model not ready.
+   * Used by middleware on every admin request.
+   */
+  async _loadUser(id) {
+    const M = this._resolveUserModel();
+    if (!M || !id) return null;
+    try {
+      return await M.find(id) || null;
+    } catch { return null; }
   }
 
-  async _checkPassword(plain, hash) {
-    if (!plain || !hash) return false;
-    // Support both plain-text passwords (dev) and bcrypt hashes (prod)
-    if (hash.startsWith('$2')) {
-      return bcrypt.compare(String(plain), hash);
-    }
-    // Plain text comparison — warn in development
-    if (process.env.NODE_ENV !== 'production') {
-      process.stderr.write(
-        '[millas admin] Warning: using plain-text password. Use a bcrypt hash in production.\n'
-      );
-    }
-    return plain === hash;
+  /**
+   * Load a user by email. Returns null if not found.
+   * Used during login.
+   */
+  async _loadUserByEmail(email) {
+    const M = this._resolveUserModel();
+    if (!M) return null;
+    try {
+      return await M.findBy('email', email) || null;
+    } catch { return null; }
+  }
+
+  /**
+   * Resolve the User model.
+   * Priority: explicitly set via setUserModel() / config.model
+   *           → app/models/User → built-in AuthUser
+   */
+  _resolveUserModel() {
+    if (this._UserModel) return this._UserModel;
+
+    // Lazy fallback — allows AdminAuth to work even if boot order is unusual
+    try {
+      const nodePath = require('path');
+      const base     = this._basePath || process.cwd();
+      const appUser  = nodePath.join(base, 'app/models/User');
+      this._UserModel = require(appUser);
+      return this._UserModel;
+    } catch {}
+
+    try {
+      this._UserModel = require('../auth/AuthUser');
+      return this._UserModel;
+    } catch { return null; }
   }
 
   // ─── Rate limiting ────────────────────────────────────────────────────────
 
   _checkRateLimit(ip) {
-    const entry = this._attempts?.get(ip);
+    const entry = this._attempts.get(ip);
     if (!entry) return;
-
     if (entry.lockedUntil && Date.now() < entry.lockedUntil) {
       const mins = Math.ceil((entry.lockedUntil - Date.now()) / 60000);
       throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins > 1 ? 's' : ''}.`);
     }
-
     if (entry.lockedUntil && Date.now() >= entry.lockedUntil) {
       this._attempts.delete(ip);
     }
   }
 
   _recordFailedAttempt(ip) {
-    const entry = this._attempts?.get(ip) || { count: 0, lockedUntil: null };
+    const entry = this._attempts.get(ip) || { count: 0, lockedUntil: null };
     entry.count++;
     if (entry.count >= (this._config.maxAttempts || 5)) {
       const mins = this._config.lockoutMinutes || 15;
       entry.lockedUntil = Date.now() + mins * 60 * 1000;
     }
-    this._attempts?.set(ip, entry);
+    this._attempts.set(ip, entry);
   }
 
   _clearAttempts(ip) {
-    this._attempts?.delete(ip);
+    this._attempts.delete(ip);
   }
 }
 

@@ -74,19 +74,19 @@
       </button>
       {% endif %}
 
-      {# Export dropdown #}
-      <div class="action-menu">
-        <button class="btn btn-ghost btn-sm action-menu-btn">
+      {# Export dropdown — portal-rendered via UI.Dropdown #}
+      <div class="ui-menu" id="export-menu-wrap">
+        <button class="btn btn-ghost btn-sm" id="export-menu-btn" type="button">
           <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
           Export
           <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-chevron-down"/></svg></span>
         </button>
-        <div class="action-dropdown" style="right:0;min-width:160px">
-          <a href="{{ adminPrefix }}/{{ resource.slug }}/export.csv?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
+        <div class="ui-menu-panel" id="export-menu-panel" style="display:none">
+          <a class="ui-menu-item" href="{{ adminPrefix }}/{{ resource.slug }}/export.csv?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
             <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
             Export CSV
           </a>
-          <a href="{{ adminPrefix }}/{{ resource.slug }}/export.json?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
+          <a class="ui-menu-item" href="{{ adminPrefix }}/{{ resource.slug }}/export.json?search={{ search }}&sort={{ sort }}&order={{ order }}{% for key, val in activeFilters %}&filter[{{ key }}]={{ val }}{% endfor %}">
             <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-download"/></svg></span>
             Export JSON
           </a>
@@ -99,10 +99,18 @@
   <div class="bulk-bar" id="bulk-bar">
     <span class="bulk-count" id="bulk-count">0 selected</span>
     <span class="text-muted" style="font-size:12px">—</span>
+    {% for action in resource.actions %}
+    <button class="btn btn-ghost btn-sm" onclick="bulkAction({{ action.index }})">
+      {% if action.icon %}<span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ action.icon }}"/></svg></span>{% endif %}
+      {{ action.label }}
+    </button>
+    {% endfor %}
+    {% if resource.canDelete %}
     <button class="btn btn-ghost btn-sm btn-danger" onclick="bulkDelete()">
       <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
       Delete selected
     </button>
+    {% endif %}
     <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">
       <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg></span>
       Cancel
@@ -186,7 +194,7 @@
             {% endif %}
           </th>
           {% endfor %}
-          {% if resource.canEdit or resource.canDelete %}
+          {% if resource.canEdit or resource.canDelete or resource.rowActions | length %}
           <th class="col-actions">Actions</th>
           {% endif %}
         </tr>
@@ -200,10 +208,10 @@
           {% for field in listFields %}
           <td class="{% if loop.first %}td-primary{% endif %}">{{ row[field.name] | adminCell(field) | safe }}</td>
           {% endfor %}
-          {% if resource.canEdit or resource.canDelete %}
+          {% if resource.canEdit or resource.canDelete or resource.rowActions | length %}
           <td class="col-actions">
-            <div class="action-menu">
-              <button class="action-menu-btn">
+            <div class="ui-menu">
+              <button class="action-menu-btn ui-menu-trigger" type="button" aria-label="Row actions">
                 <span class="icon icon-14">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="5" r="1.2" fill="currentColor" stroke="none"/>
@@ -212,20 +220,36 @@
                   </svg>
                 </span>
               </button>
-              <div class="action-dropdown">
+              <div class="ui-menu-panel" style="display:none">
                 {% if resource.canEdit %}
-                <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/edit">
+                <a class="ui-menu-item" href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/edit">
                   <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg></span>
                   Edit
                 </a>
                 {% endif %}
-                <a href="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}" style="display:none">
-                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg></span>
-                  View
+                {% if row._rowActions | length %}
+                {% if resource.canEdit %}<div class="ui-menu-sep"></div>{% endif %}
+                {% for ra in row._rowActions %}
+                {% if ra.href %}
+                <a class="ui-menu-item" href="{{ ra.href }}" target="_blank" rel="noopener">
+                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ ra.icon or 'eye' }}"/></svg></span>
+                  {{ ra.label }}
                 </a>
+                {% elif ra.action %}
+                <button class="ui-menu-item" type="button"
+                  data-row-action="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/action/{{ ra.action }}"
+                  data-row-action-label="{{ ra.label }}">
+                  <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ ra.icon or 'check' }}"/></svg></span>
+                  {{ ra.label }}
+                </button>
+                {% endif %}
+                {% endfor %}
+                {% endif %}
                 {% if resource.canDelete %}
-                <div class="sep"></div>
-                <button class="danger" onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/delete', '#{{ row.id }}')">
+                <div class="ui-menu-sep"></div>
+                <button class="ui-menu-item ui-menu-danger" type="button"
+                  data-confirm-delete="{{ adminPrefix }}/{{ resource.slug }}/{{ row.id }}/delete"
+                  data-confirm-label="#{{ row.id }}">
                   <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
                   Delete
                 </button>
@@ -300,60 +324,244 @@
 </div>
 
 <script>
-  // ── Filter panel toggle ──────────────────────────────────────
-  const filterPanel = document.getElementById('filter-panel');
-  {% if activeFilters | length %}
-  if (filterPanel) filterPanel.style.display = 'flex';
-  {% endif %}
+  $(function() {
+    var PREFIX = '{{ adminPrefix }}';
+    var SLUG   = '{{ resource.slug }}';
 
-  function toggleFilters() {
-    if (!filterPanel) return;
-    const shown = filterPanel.style.display !== 'none';
-    filterPanel.style.display = shown ? 'none' : 'flex';
-  }
+    // ── Filter panel ─────────────────────────────────────────────────────────
+    {% if activeFilters | length %}$('#filter-panel').show();{% endif %}
 
-  // ── Live search on Enter ──────────────────────────────────────
-  const searchForm = document.getElementById('search-form');
-  if (searchForm) {
-    searchForm.querySelector('input[name="search"]')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') searchForm.submit();
+    window.toggleFilters = function() {
+      $('#filter-panel').toggle();
+    };
+
+    // ── Live search on Enter ──────────────────────────────────────────────────
+    $('#search-form input[name="search"]').on('keydown', function(e) {
+      if (e.key === 'Enter') $('#search-form').submit();
     });
-  }
 
-  // ── Bulk selection ────────────────────────────────────────────
-  const bulkBar   = document.getElementById('bulk-bar');
-  const bulkCount = document.getElementById('bulk-count');
-
-  function updateBulkBar() {
-    const checked = document.querySelectorAll('.item-check:checked');
-    const n = checked.length;
-    bulkBar.classList.toggle('visible', n > 0);
-    if (bulkCount) bulkCount.textContent = `${n} selected`;
-    const all = document.getElementById('check-all');
-    if (all) {
-      const total = document.querySelectorAll('.item-check').length;
-      all.indeterminate = n > 0 && n < total;
-      all.checked = n > 0 && n === total;
+    // ── Bulk selection ────────────────────────────────────────────────────────
+    function updateBulkBar() {
+      var $checked = $('.item-check:checked');
+      var n        = $checked.length;
+      var total    = $('.item-check').length;
+      $('#bulk-bar').toggleClass('visible', n > 0);
+      $('#bulk-count').text(n + ' selected');
+      $('#check-all').prop('indeterminate', n > 0 && n < total)
+                     .prop('checked',       n > 0 && n === total);
     }
-  }
 
-  function toggleAll(master) {
-    document.querySelectorAll('.item-check').forEach(c => { c.checked = master.checked; });
-    updateBulkBar();
-  }
+    window.toggleAll = function(master) {
+      $('.item-check').prop('checked', master.checked);
+      updateBulkBar();
+    };
 
-  function clearSelection() {
-    document.querySelectorAll('.item-check, #check-all').forEach(c => { c.checked = false; c.indeterminate = false; });
-    updateBulkBar();
-  }
+    window.clearSelection = function() {
+      $('.item-check, #check-all').prop('checked', false).prop('indeterminate', false);
+      updateBulkBar();
+    };
 
-  function bulkDelete() {
-    const ids = [...document.querySelectorAll('.item-check:checked')].map(c => c.value);
-    if (!ids.length) return;
-    confirmDelete(
-      '{{ adminPrefix }}/{{ resource.slug }}/bulk-delete',
-      `${ids.length} record${ids.length > 1 ? 's' : ''}`
-    );
-  }
+    $(document).on('change', '.item-check', updateBulkBar);
+
+    window.bulkDelete = function() {
+      var ids   = $('.item-check:checked').map(function() { return this.value; }).get();
+      if (!ids.length) return;
+      var label = ids.length + ' record' + (ids.length > 1 ? 's' : '');
+      confirmDeleteBulk(PREFIX + '/' + SLUG + '/bulk-delete', label, ids);
+    };
+
+    window.confirmDeleteBulk = function(url, label, ids) {
+      UI.Confirm.show({
+        title:   'Delete ' + label,
+        message: 'Delete <strong>' + label + '</strong>? This cannot be undone.',
+        confirm: 'Delete',
+        danger:  true,
+      }).then(function(ok) {
+        if (!ok) return;
+        var csrf = $('meta[name="csrf-token"]').attr('content') || '';
+        var $form = $('<form method="POST">').attr('action', url);
+        $form.append('<input name="_csrf" value="' + csrf + '">');
+        $.each(ids, function(_, id) {
+          $form.append('<input type="hidden" name="ids[]" value="' + id + '">');
+        });
+        $form.appendTo('body').submit();
+      });
+    };
+
+    window.bulkAction = function(actionIndex) {
+      var ids = $('.item-check:checked').map(function() { return this.value; }).get();
+      if (!ids.length) return;
+      var csrf = $('meta[name="csrf-token"]').attr('content') || '';
+      var $form = $('<form method="POST">').attr('action', PREFIX + '/' + SLUG + '/bulk-action');
+      $form.append('<input name="_csrf" value="' + csrf + '">');
+      $form.append('<input type="hidden" name="actionIndex" value="' + actionIndex + '">');
+      $.each(ids, function(_, id) {
+        $form.append('<input type="hidden" name="ids[]" value="' + id + '">');
+      });
+      $form.appendTo('body').submit();
+    };
+
+    // ── UI.Dropdown — portal-rendered action menus ────────────────────────────
+    // Wire export menu
+    var $exportBtn   = $('#export-menu-btn');
+    var $exportPanel = $('#export-menu-panel');
+    if ($exportBtn.length && $exportPanel.length) {
+      var exportDd = UI.Dropdown.create({
+        anchor:    $exportBtn[0],
+        content:   $exportPanel[0],
+        placement: 'bottom-end',
+        offset:    4,
+      });
+      $exportBtn.on('click', function() { exportDd.toggle(); });
+    }
+
+    // Wire per-row action menus
+    $('.ui-menu').each(function() {
+      var $menu  = $(this);
+      var $btn   = $menu.find('.ui-menu-trigger');
+      var $panel = $menu.find('.ui-menu-panel');
+      if (!$btn.length || !$panel.length) return;
+
+      var dd = UI.Dropdown.create({
+        anchor:    $btn[0],
+        content:   $panel[0],
+        placement: 'bottom-end',
+        offset:    4,
+      });
+
+      $btn.on('click', function(e) {
+        e.stopPropagation();
+        dd.toggle();
+      });
+
+      $panel.find('[data-confirm-delete]').on('click', function() {
+        dd.close();
+        confirmDelete($(this).data('confirm-delete'), $(this).data('confirm-label'));
+      });
+
+      $panel.find('[data-row-action]').on('click', function() {
+        dd.close();
+        var url   = $(this).data('row-action');
+        var label = $(this).data('row-action-label');
+        UI.Confirm.show({
+          title:   label,
+          message: 'Run <strong>' + label + '</strong> on this record?',
+          confirm: label,
+        }).then(function(ok) {
+          if (!ok) return;
+          var csrf = $('meta[name="csrf-token"]').attr('content') || '';
+          var $form = $('<form method="POST">').attr('action', url);
+          $form.append('<input name="_csrf" value="' + csrf + '">');
+          $form.appendTo('body').submit();
+        });
+      });
+
+      // ── Right-click on the row opens a context menu at the cursor ──────────
+      (function($menuPanel) {
+        var $row = $menuPanel.closest('tr');
+
+        $row.on('contextmenu', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          // Remove any existing portal
+          $('.context-menu-portal').remove();
+
+          // Build a fresh portal from the panel's inner HTML (avoids clone display:none)
+          var $p = $('<div class="ui-menu-panel context-menu-portal"></div>');
+          $p.html($menuPanel.html());
+          $p.css({
+            position: 'fixed',
+            top:      Math.min(e.clientY, window.innerHeight - 240) + 'px',
+            left:     Math.min(e.clientX, window.innerWidth  - 190) + 'px',
+            zIndex:   9999,
+          });
+          $('body').append($p);
+
+          // Wire handlers on the portal
+          $p.find('[data-confirm-delete]').on('click', function() {
+            $p.remove();
+            confirmDelete($(this).data('confirm-delete'), $(this).data('confirm-label'));
+          });
+          $p.find('[data-row-action]').on('click', function() {
+            $p.remove();
+            var _url   = $(this).data('row-action');
+            var _label = $(this).data('row-action-label');
+            UI.Confirm.show({
+              title:   _label,
+              message: 'Run <strong>' + _label + '</strong> on this record?',
+              confirm: _label,
+            }).then(function(ok) {
+              if (!ok) return;
+              var csrf = $('meta[name="csrf-token"]').attr('content') || '';
+              var $form = $('<form method="POST">').attr('action', _url);
+              $form.append('<input name="_csrf" value="' + csrf + '">');
+              $form.appendTo('body').submit();
+            });
+          });
+          $p.find('a.ui-menu-item').on('click', function() { $p.remove(); });
+
+          // Dismiss on next click anywhere or Escape
+          setTimeout(function() {
+            $(document).one('click.ctxmenu', function() { $p.remove(); });
+          }, 0);
+          $(document).one('keydown.ctxmenu', function(ev) {
+            if (ev.key === 'Escape') { $p.remove(); }
+          });
+        });
+      })($panel);
+    });
+  });
 </script>
+
+<style>
+  /* ── UI Menu (portal dropdown) ── */
+  .ui-menu { position: relative; display: inline-block; }
+
+  .ui-menu-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    min-width: 150px;
+    overflow: hidden;
+  }
+
+  .ui-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text-soft);
+    text-decoration: none;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .1s;
+    white-space: nowrap;
+  }
+  .ui-menu-item:hover { background: var(--surface2); color: var(--text); }
+  .ui-menu-danger     { color: var(--danger); }
+  .ui-menu-danger:hover { background: var(--danger-bg); color: var(--danger); }
+
+  .ui-menu-sep { height: 1px; background: var(--border-soft); margin: 3px 0; }
+
+  /* ── Context menu portal ── */
+  .context-menu-portal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    min-width: 160px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.08);
+  }
+
+  /* ── Right-click cursor hint on rows ── */
+  #data-table tbody tr { cursor: context-menu; }
+  #data-table tbody tr:hover { background: var(--surface2); }
+</style>
+
 {% endblock %}

@@ -30,12 +30,19 @@ const MillasConfig = require('./MillasConfig');
 const Millas = {
   /**
    * Start building an application config.
-   * Returns a MillasConfig chain ending in .create().
+   * Equivalent to Millas.config().configure(basePath).
    *
+   * Usage (bootstrap/app.js):
+   *   module.exports = Millas.configure(__dirname)
+   *     .withAdmin()
+   *     .routes(Route => { ... })
+   *     .create();
+   *
+   * @param {string} basePath — pass __dirname from bootstrap/app.js
    * @returns {MillasConfig}
    */
-  config() {
-    return new MillasConfig();
+  configure(basePath) {
+    return new MillasConfig().configure(basePath);
   },
 };
 

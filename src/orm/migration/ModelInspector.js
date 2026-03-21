@@ -3,6 +3,8 @@
 const fs = require('fs-extra');
 const path = require('path');
 const MillasLog = require('../../logger/internal');
+const { walkJs, extractClasses, isMillasModel, fieldsEqual } = require('./utils');
+const { normaliseField } = require('./ProjectState');
 
 /**
  * ModelInspector
@@ -30,6 +32,85 @@ class ModelInspector {
         this._modelsPath = modelsPath;
         this._migrationsPath = migrationsPath;
         this._snapshotPath = snapshotPath || path.join(process.cwd(), '.millas', 'schema.json');
+    }
+
+    /**
+     * The baseline schema that each system migration creates.
+     * Keyed by table name → field definitions (same shape as _extractFields output).
+     *
+     * When makemigrations encounters a system-owned table for the first time
+     * (no snapshot entry yet), it seeds the snapshot from this baseline rather
+     * than from the current model. That ensures any fields the developer added
+     * beyond the baseline are detected as add_column diffs — not silently ignored.
+     *
+     * Keep in sync with src/migrations/system/000*.js.
+     */
+    static get SYSTEM_BASELINES() {
+        // Lazy-load AuthUser so this file has no hard dependency at module load time.
+        // The getter is only called during makeMigrations(), never at require() time.
+        const AuthUser = require('../../auth/AuthUser');
+        const { fields } = require('../fields/index');
+
+        const extractFields = (fieldsMap) => {
+            const result = {};
+            for (const [name, field] of Object.entries(fieldsMap)) {
+                result[name] = {
+                    type:       field.type        ?? 'string',
+                    nullable:   field.nullable     ?? false,
+                    unique:     field.unique        ?? false,
+                    default:    field.default !== undefined ? field.default : null,
+                    max:        field.max          ?? null,
+                    unsigned:   field.unsigned      ?? false,
+                    enumValues: field.enumValues    ?? null,
+                    references: field.references    ?? null,
+                    precision:  field.precision     ?? null,
+                    scale:      field.scale         ?? null,
+                };
+            }
+            return result;
+        };
+
+        return {
+            // system/0001_users.js — mirrors AuthUser.fields exactly
+            users: extractFields(AuthUser.fields),
+
+            // system/0002_admin_log.js
+            millas_admin_log: extractFields({
+                id:         fields.id(),
+                user_id:    fields.integer({ unsigned: true, nullable: true }),
+                user_email: fields.string({ nullable: true }),
+                resource:   fields.string(),
+                record_id:  fields.string({ nullable: true }),
+                action:     fields.enum(['create', 'update', 'delete']),
+                label:      fields.string({ nullable: true }),
+                change_msg: fields.text({ nullable: true }),
+                created_at: fields.timestamp(),
+            }),
+
+            // system/0003_sessions.js
+            millas_sessions: extractFields({
+                session_key: fields.string({ max: 64 }),
+                user_id:     fields.integer({ unsigned: true }),
+                payload:     fields.text({ nullable: true }),
+                ip_address:  fields.string({ max: 45, nullable: true }),
+                user_agent:  fields.string({ max: 512, nullable: true }),
+                expires_at:  fields.timestamp(),
+                created_at:  fields.timestamp(),
+            }),
+
+            // millas_migrations — internal tracking table, not user-accessible
+            millas_migrations: extractFields({
+                id:    fields.id(),
+                name:  fields.string(),
+                pool:  fields.string({ max: 20 }),
+                batch: fields.integer(),
+            }),
+        };
+    }
+
+    /** Convenience: just the set of system table names. */
+    static get SYSTEM_TABLES() {
+        return new Set(Object.keys(ModelInspector.SYSTEM_BASELINES));
     }
 
     /**
@@ -75,34 +156,60 @@ class ModelInspector {
      */
     _scanModels() {
         const schema = {};
+        const tableToFile = {}; // track which file owns each table name
 
         if (!fs.existsSync(this._modelsPath)) return schema;
 
-        const files = fs.readdirSync(this._modelsPath)
-            .filter(f => f.endsWith('.js') && !f.startsWith('.') && f !== 'index.js');
+        const files = walkJs(this._modelsPath);
 
-        for (const file of files) {
-            const fullPath = path.join(this._modelsPath, file);
+        for (const fullPath of files) {
+            const file = path.basename(fullPath);
+            const relPath = path.relative(this._modelsPath, fullPath);
 
             // Always bust require cache so the inspector picks up edits made
             // in the same process (e.g. during tests).
             try {
                 delete require.cache[require.resolve(fullPath)];
-            } catch { /* path not yet cached — fine */
-            }
+            } catch { /* path not yet cached — fine */ }
 
             let exported;
-            exported = require(fullPath);
-
+            try {
+                exported = require(fullPath);
+            } catch (err) {
+                // Surface require errors so developers know why a model was skipped.
+                // Common causes: missing dependency, syntax error, bad import path.
+                MillasLog.warn(`[makemigrations] Skipping ${path.relative(this._modelsPath, fullPath)}: ${err.message}`);
+                process.stderr.write(`  ⚠  Could not load model: ${path.relative(this._modelsPath, fullPath)}\n     ${err.message}\n`);
+                continue;
+            }
 
             // Collect every candidate class from the export
-            const candidates = this._extractClasses(exported);
+            const candidates = extractClasses(exported);
 
             for (const ModelClass of candidates) {
-                if (!this._isMillasModel(ModelClass)) continue;
+                if (!isMillasModel(ModelClass)) continue;
 
                 const table = this._resolveTable(ModelClass, file);
-                schema[table] = this._extractFields(ModelClass.fields);
+
+                if (tableToFile[table] && tableToFile[table] !== relPath) {
+                    // Same table claimed by two files.
+                    // This is the inheritance pattern: User extends BaseUser, same table.
+                    // Keep the one with MORE fields — that's always the most derived class,
+                    // which has the complete column set for the table.
+                    const existingFieldCount = Object.keys(schema[table] || {}).length;
+                    const newFieldCount      = Object.keys(ModelClass.fields || {}).length;
+
+                    if (newFieldCount > existingFieldCount) {
+                        // New class is more derived — replace
+                        tableToFile[table] = relPath;
+                        schema[table] = this._extractFields(ModelClass.fields);
+                    }
+                    // Otherwise keep the existing (more derived) definition silently.
+                    // No warning — this is expected when extending a base model.
+                } else if (!tableToFile[table]) {
+                    tableToFile[table] = relPath;
+                    schema[table] = this._extractFields(ModelClass.fields);
+                }
             }
         }
 
@@ -110,49 +217,19 @@ class ModelInspector {
     }
 
     /**
-     * Given a module export (class, plain object, or anything), return an
-     * array of class/function values that might be Model subclasses.
+     * Recursively collect all .js files under a directory,
+     * excluding dotfiles and index.js at any depth.
      */
-    _extractClasses(exported) {
-        if (!exported) return [];
 
-        // Direct class export:  module.exports = MyModel
-        if (typeof exported === 'function') return [exported];
-
-        // Named export object:  module.exports = { MyModel, AnotherModel }
-        if (typeof exported === 'object') {
-            return Object.values(exported).filter(v => typeof v === 'function');
-        }
-
-        return [];
-    }
 
     /**
-     * A class qualifies as a Millas Model if:
-     *   - It is a function (class)
-     *   - It has a static `fields` property that is a non-null object
-     *
-     * We intentionally do NOT do `instanceof` checks so the inspector
-     * works even when the user imports Model from a different resolution
-     * path than the one this file was loaded from.
-     */
-    _isMillasModel(cls) {
-        if (typeof cls !== 'function') return false;
-        if (!cls.fields || typeof cls.fields !== 'object') return false;
-        // Must have at least one field
-        return Object.keys(cls.fields).length > 0;
-    }
-
-    /**
-     * Derive the table name from the model class or fall back to the file name.
+     * Derive the table name from the model class.
+     * Delegates to utils.resolveTable which respects abstract flag and convention.
+     * fileName fallback kept for backward compat with old snapshot entries.
      */
     _resolveTable(ModelClass, fileName) {
-        // Explicitly set static table = '...'
-        if (typeof ModelClass.table === 'string' && ModelClass.table) {
-            return ModelClass.table;
-        }
-        // Convention: file name without extension, pluralised, lowercased
-        return fileName.replace(/\.js$/, '').toLowerCase() + 's';
+        return resolveTable(ModelClass) ||
+          (fileName ? fileName.replace(/\.js$/, '').toLowerCase() + 's' : null);
     }
 
     /**
@@ -161,24 +238,11 @@ class ModelInspector {
      * snapshot storage and deterministic JSON comparison.
      */
     _extractFields(fields) {
+        // Delegate to normaliseField — single source of truth for field shape.
         const result = {};
-
         for (const [name, field] of Object.entries(fields)) {
-            // Normalise — accept both FieldDefinition instances and plain objects
-            result[name] = {
-                type: field.type ?? 'string',
-                nullable: field.nullable ?? false,
-                unique: field.unique ?? false,
-                default: field.default !== undefined ? field.default : null,
-                max: field.max ?? null,
-                unsigned: field.unsigned ?? false,
-                enumValues: field.enumValues ?? null,
-                references: field.references ?? null,
-                precision: field.precision ?? null,
-                scale: field.scale ?? null,
-            };
+            result[name] = normaliseField(field);
         }
-
         return result;
     }
 
@@ -190,13 +254,24 @@ class ModelInspector {
         // New tables (model added / first run)
         for (const table of Object.keys(current)) {
             if (!snapshot[table]) {
-                diffs.push({type: 'create_table', table, fields: current[table]});
+                if (ModelInspector.SYSTEM_TABLES.has(table)) {
+                    // System table — already created by a system migration.
+                    // Seed the snapshot from the KNOWN SYSTEM BASELINE (what the
+                    // migration actually created), NOT from the current model.
+                    // This ensures any extra fields the developer added beyond the
+                    // baseline are detected as add_column diffs below.
+                    snapshot[table] = ModelInspector.SYSTEM_BASELINES[table] || current[table];
+                } else {
+                    diffs.push({type: 'create_table', table, fields: current[table]});
+                }
             }
         }
 
         // Dropped tables (model file removed)
+        // Never generate drop_table for system tables — they are managed by
+        // system migrations, not by user model files.
         for (const table of Object.keys(snapshot)) {
-            if (!current[table]) {
+            if (!current[table] && !ModelInspector.SYSTEM_TABLES.has(table)) {
                 diffs.push({type: 'drop_table', table, fields: snapshot[table]});
             }
         }
@@ -225,7 +300,7 @@ class ModelInspector {
             // Changed columns — compare each attribute individually for stability
             for (const col of Object.keys(curr)) {
                 if (!prev[col]) continue; // new column — already handled above
-                if (!this._fieldsEqual(curr[col], prev[col])) {
+                if (!fieldsEqual(curr[col], prev[col])) {
                     diffs.push({
                         type: 'alter_column',
                         table,
@@ -244,13 +319,7 @@ class ModelInspector {
      * Stable field equality check that ignores key-ordering differences
      * which can appear when objects are reconstituted from JSON.
      */
-    _fieldsEqual(a, b) {
-        const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-        for (const k of keys) {
-            if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) return false;
-        }
-        return true;
-    }
+
 
     // ─── Migration generation ─────────────────────────────────────────────────
 

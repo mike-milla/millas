@@ -23,12 +23,15 @@ const HttpServer = require('./HttpServer');
  *   bootstrap/app.js  →  MillasInstance  →  AppInitialiser.boot()
  *                                              ├─ builds ExpressAdapter
  *                                              ├─ builds Application
- *                                              ├─ registers providers
+ *                                              ├─ registers core providers
+ *                                              │    Log → Database → Auth → Admin
+ *                                              │    → Cache → Mail → Queue → Events
+ *                                              ├─ registers app providers
  *                                              ├─ registers routes
  *                                              ├─ registers middleware aliases
- *                                              ├─ boots providers
+ *                                              ├─ boots all providers
  *                                              ├─ mounts routes
- *                                              ├─ mounts admin (if configured)
+ *                                              ├─ mounts admin panel
  *                                              ├─ mounts fallbacks
  *                                              └─ starts HttpServer
  */
@@ -46,52 +49,74 @@ class AppInitializer {
      * Boot the full application and start the HTTP server.
      * Returns a Promise that resolves once the server is listening.
      */
+    /**
+     * Boot the full application and start the HTTP server.
+     * Called by millas serve — no changes to the developer API.
+     */
     async boot() {
+        await this.bootKernel();
+        await this._serve();
+    }
+
+    /**
+     * Boot the application kernel only — DI container, providers, DB, auth,
+     * cache, mail, queue. No HTTP server, no routes, no listen().
+     *
+     * Used internally by CLI commands (millas migrate, millas createsuperuser, etc.)
+     * via MILLAS_CLI_BOOT=1 environment variable. Developers never call this directly.
+     *
+     * @returns {Application} the booted kernel
+     */
+    async bootKernel() {
         const cfg = this._config;
 
-        // ── Build the HTTP adapter ───────────────────────────────────────────────
         const ExpressAdapter = require('../http/adapters/ExpressAdapter');
         const expressApp = express();
         this._adapter = new ExpressAdapter(expressApp);
         this._adapter.applyBodyParsers();
 
-        // Raw adapter middleware (helmet, compression, etc.)
         for (const mw of (cfg.adapterMiddleware || [])) {
             this._adapter.applyMiddleware(mw);
         }
 
-        // ── Build the Application kernel ─────────────────────────────────────────
         this._kernel = new Application(this._adapter);
 
-        // Core providers (auto-enabled unless disabled in config)
+        const basePath = cfg.basePath || process.cwd();
+        this._kernel._container.instance('basePath', basePath);
+
         const coreProviders = this._buildCoreProviders(cfg);
         this._kernel.providers([...coreProviders, ...cfg.providers]);
 
-        // Named middleware aliases
         for (const {alias, handler} of (cfg.middleware || [])) {
             this._kernel.middleware(alias, handler);
         }
 
-        // Route definitions
         if (cfg.routes) {
             this._kernel.routes(cfg.routes);
         }
 
-        // ── Boot providers ───────────────────────────────────────────────────────
         await this._kernel.boot();
 
-        // ── Mount routes ─────────────────────────────────────────────────────────
+        return this._kernel;
+    }
+
+    /**
+     * Mount routes and start the HTTP server.
+     * Internal — called only by boot(). CLI commands stop after bootKernel().
+     */
+    async _serve() {
+        const cfg = this._config;
+
         if (!process.env.MILLAS_ROUTE_LIST) {
             this._kernel.mountRoutes();
 
-            // Admin panel — mounted between routes and fallbacks
             if (cfg.admin !== null) {
                 try {
                     const Admin = require('../admin/Admin');
                     if (cfg.admin && Object.keys(cfg.admin).length) {
                         Admin.configure(cfg.admin);
                     }
-                    Admin.mount(expressApp);
+                    Admin.mount(this._adapter.nativeApp);
                 } catch (err) {
                     process.stderr.write(`[millas] Admin mount failed: ${err.message}\n`);
                 }
@@ -99,9 +124,8 @@ class AppInitializer {
 
             this._kernel.mountFallbacks();
 
-            // ── Start the HTTP server ──────────────────────────────────────────────
             const server = new HttpServer(this._kernel, {
-                onStart: cfg.onStart || undefined,
+                onStart:    cfg.onStart    || undefined,
                 onShutdown: cfg.onShutdown || undefined,
             });
 
@@ -114,22 +138,39 @@ class AppInitializer {
     _buildCoreProviders(cfg) {
         const providers = [];
         const load = (p) => {
-            try {
-                return require(p);
-            } catch {
-                return null;
-            }
+            try { return require(p); } catch { return null; }
         };
 
+        // ── 1. Logging ───────────────────────────────────────────────────────
         if (cfg.logging !== false) {
             const p = load('../providers/LogServiceProvider');
             if (p) providers.push(p);
         }
+
+        // ── 2. Database ──────────────────────────────────────────────────────
         if (cfg.database !== false) {
             const p = load('../providers/DatabaseServiceProvider');
             if (p) providers.push(p);
         }
 
+        // ── 3. Auth — always on unless explicitly disabled ───────────────────
+        // Mirrors Django: django.contrib.auth is in INSTALLED_APPS by default.
+        // Provides Auth.login/register, JWT middleware, the User model.
+        // Requires Database to be booted first.
+        if (cfg.auth !== false) {
+            const p = load('../providers/AuthServiceProvider');
+            if (p) providers.push(p);
+        }
+
+        // ── 4. Admin — on when .withAdmin() was called ───────────────────────
+        // Mirrors Django: django.contrib.admin is in INSTALLED_APPS by default.
+        // Requires Auth to be booted first (needs the resolved User model).
+        if (cfg.admin !== null && cfg.admin !== undefined) {
+            const p = load('../providers/AdminServiceProvider');
+            if (p) providers.push(p);
+        }
+
+        // ── 5. Cache + Storage ───────────────────────────────────────────────
         if (cfg.cache !== false || cfg.storage !== false) {
             const p = load('../providers/CacheStorageServiceProvider');
             if (p) {
@@ -138,20 +179,52 @@ class AppInitializer {
             }
         }
 
+        // ── 6. Mail ──────────────────────────────────────────────────────────
         if (cfg.mail !== false) {
             const p = load('../providers/MailServiceProvider');
             if (p) providers.push(p);
         }
+
+        // ── 7. Queue ─────────────────────────────────────────────────────────
         if (cfg.queue !== false) {
             const p = load('../providers/QueueServiceProvider');
             if (p) providers.push(p);
         }
+
+        // ── 8. Events ────────────────────────────────────────────────────────
         if (cfg.events !== false) {
             const p = load('../providers/EventServiceProvider');
             if (p) providers.push(p);
         }
 
+        // ── 9. i18n — opt-in via config/app.js use_i18n: true ───────────────
+        // Mirrors Django's USE_I18N = True in settings.py.
+        // Booted last so translations are available in all request handlers.
+        if (this._resolveI18nEnabled(cfg)) {
+            const p = load('../i18n/I18nServiceProvider');
+            if (p) providers.push(p);
+        }
+
         return providers;
+    }
+
+    /**
+     * Resolve whether i18n should be enabled.
+     * Reads use_i18n from config/app.js — the single source of truth.
+     *
+     *   // config/app.js
+     *   module.exports = {
+     *     use_i18n: true,
+     *     locale:   'sw',
+     *     fallback: 'en',
+     *   };
+     */
+    _resolveI18nEnabled(cfg) {
+        try {
+            const basePath  = cfg.basePath || process.cwd();
+            const appConfig = require(basePath + '/config/app');
+            return appConfig.use_i18n === true;
+        } catch { return false; }
     }
 }
 

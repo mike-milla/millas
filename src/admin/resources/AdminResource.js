@@ -1,5 +1,10 @@
 'use strict';
 
+const { normaliseField } = require('../../orm/migration/ProjectState');
+const { HookPipeline, AdminHooks } = require('../HookRegistry');
+const { FormGenerator }              = require('../FormGenerator');
+const { QueryEngine }                = require('../QueryEngine');
+
 /**
  * AdminResource
  *
@@ -146,8 +151,13 @@ class AdminResource {
    * Use AdminField.tab() and AdminField.fieldset() for layout.
    */
   static fields() {
-    if (!this.model?.fields) return [];
-    return Object.entries(this.model.fields).map(([name, def]) =>
+    // Use getFields() to get the merged field map (honours abstract inheritance).
+    // Falls back to .fields for models that don't yet have getFields().
+    const fieldMap = typeof this.model?.getFields === 'function'
+      ? this.model.getFields()
+      : (this.model?.fields || {});
+    if (!Object.keys(fieldMap).length) return [];
+    return Object.entries(fieldMap).map(([name, def]) =>
       AdminField.fromModelField(name, def)
     );
   }
@@ -161,91 +171,27 @@ class AdminResource {
    * Override to customise how records are fetched.
    * Receives { page, perPage, search, sort, order, filters }
    */
-  static async fetchList({ page = 1, perPage, search, sort = 'id', order = 'desc', filters = {}, year, month } = {}) {
-    const limit  = perPage || this.perPage;
-    const offset = (page - 1) * limit;
-
-    // _db() is available on all ORM versions — it returns a raw knex table query.
-    // We build everything via knex directly so this works regardless of whether
-    // the ORM changes (changes3) have been applied.
-    let q = this.model._db().orderBy(sort, order);
-
-    // ── Search ───────────────────────────────────────────────────────────────
-    if (search && this.searchable.length) {
-      const cols = this.searchable;
-      q = q.where(function () {
-        for (const col of cols) {
-          this.orWhere(col, 'like', `%${search}%`);
-        }
-      });
-    }
-
-    // ── Filters ──────────────────────────────────────────────────────────────
-    // Translate __ lookup syntax into knex calls so filter controls work
-    // even without the ORM changes applied.
-    for (const [key, value] of Object.entries(filters)) {
-      if (value === '' || value === null || value === undefined) continue;
-
-      const dunder = key.lastIndexOf('__');
-      if (dunder === -1) {
-        q = q.where(key, value);
-        continue;
-      }
-
-      const col    = key.slice(0, dunder);
-      const lookup = key.slice(dunder + 2);
-
-      switch (lookup) {
-        case 'exact':   q = q.where(col, value);           break;
-        case 'not':     q = q.where(col, '!=', value);     break;
-        case 'gt':      q = q.where(col, '>',  value);     break;
-        case 'gte':     q = q.where(col, '>=', value);     break;
-        case 'lt':      q = q.where(col, '<',  value);     break;
-        case 'lte':     q = q.where(col, '<=', value);     break;
-        case 'isnull':  q = value ? q.whereNull(col) : q.whereNotNull(col); break;
-        case 'in':      q = q.whereIn(col, Array.isArray(value) ? value : [value]); break;
-        case 'notin':   q = q.whereNotIn(col, Array.isArray(value) ? value : [value]); break;
-        case 'between': q = q.whereBetween(col, value);    break;
-        case 'contains':
-        case 'icontains': q = q.where(col, 'like', `%${value}%`); break;
-        case 'startswith':
-        case 'istartswith': q = q.where(col, 'like', `${value}%`); break;
-        case 'endswith':
-        case 'iendswith': q = q.where(col, 'like', `%${value}`); break;
-        default:        q = q.where(key, value);           break;
-      }
-    }
-
-    // ── Date hierarchy ────────────────────────────────────────────────────────
-    if (this.dateHierarchy) {
-      const col = this.dateHierarchy;
-      if (year) {
-        // SQLite / MySQL / PG compatible
-        q = q.whereRaw(`strftime('%Y', "${col}") = ?`, [String(year)])
-          .catch
-          // If strftime not available (PG), fall through — best effort
-          || q;
-      }
-      if (month) {
-        q = q.whereRaw(`strftime('%m', "${col}") = ?`, [String(month).padStart(2, '0')]);
-      }
-    }
-
-    // ── Execute ───────────────────────────────────────────────────────────────
-    const [rows, countResult] = await Promise.all([
-      q.clone().limit(limit).offset(offset),
-      q.clone().count('* as count').first(),
-    ]);
-
-    const total = Number(countResult?.count ?? 0);
-
-    return {
-      data:     rows.map(r => this.model._hydrate(r)),
-      total,
-      page:     Number(page),
-      perPage:  limit,
-      lastPage: Math.ceil(total / limit) || 1,
-    };
+  /**
+   * Fetch a paginated, filtered, sorted list of records.
+   *
+   * Delegates to QueryEngine which handles:
+   *   - Django __ lookup syntax filtering
+   *   - Full-text search across searchable columns
+   *   - Date hierarchy drill-down
+   *   - Column pruning (list_display only)
+   *   - Parallel data + count queries
+   *
+   * Override this method in a subclass to customise the query entirely:
+   *
+   *   static async fetchList(opts) {
+   *     const base = await super.fetchList(opts);
+   *     // post-process base.data ...
+   *     return base;
+   *   }
+   */
+  static async fetchList(opts = {}) {
+    const engine = new QueryEngine(this);
+    return engine.fetchList(opts);
   }
 
   /**
@@ -257,34 +203,239 @@ class AdminResource {
 
   /**
    * Create a new record from form data.
+   * Fires before_save (with isNew=true) and after_save hooks.
+   *
+   * before_save can:
+   *   - Mutate and return data (e.g. hash a password, set created_by)
+   *   - Throw to abort the create with an error shown to the admin user
+   *
+   * @param {object} rawData  — raw req.body
+   * @param {object} [ctx]    — { user, resource } injected by Admin.js handler
    */
-  static async create(data) {
-    return this.model.create(this._sanitise(data));
+  static async create(rawData, ctx = {}) {
+    let data = this._sanitise(rawData);
+
+    // ── before_save ──────────────────────────────────────────────────────
+    const beforeCtx = await HookPipeline.run(
+      'before_save',
+      { data, user: ctx.user || null, isNew: true, resource: this },
+      this,
+      AdminHooks,
+    );
+    data = beforeCtx.data;
+
+    // ── Validate ────────────────────────────────────────────────────────────
+    const createErrors = FormGenerator.validate(this, data, { isNew: true });
+    if (createErrors) {
+      const err = new Error('Validation failed');
+      err.status = 422;
+      err.errors = createErrors;
+      throw err;
+    }
+
+    // ── ORM write ────────────────────────────────────────────────────────
+    const record = await this.model.create(data);
+
+    // ── after_save ───────────────────────────────────────────────────────
+    await HookPipeline.run(
+      'after_save',
+      { record, user: ctx.user || null, isNew: true, resource: this },
+      this,
+      AdminHooks,
+    );
+
+    return record;
   }
 
   /**
    * Update a record from form data.
+   * Fires before_save (with isNew=false) and after_save hooks.
+   *
+   * @param {*}      id      — primary key
+   * @param {object} rawData — raw req.body
+   * @param {object} [ctx]   — { user, resource } injected by Admin.js handler
    */
-  static async update(id, data) {
+  static async update(id, rawData, ctx = {}) {
+    let data = this._sanitise(rawData);
+
+    // ── before_save ──────────────────────────────────────────────────────
+    const beforeCtx = await HookPipeline.run(
+      'before_save',
+      { data, user: ctx.user || null, isNew: false, resource: this },
+      this,
+      AdminHooks,
+    );
+    data = beforeCtx.data;
+
+    // ── Validate ────────────────────────────────────────────────────────────
+    const updateErrors = FormGenerator.validate(this, data, { isNew: false });
+    if (updateErrors) {
+      const err = new Error('Validation failed');
+      err.status = 422;
+      err.errors = updateErrors;
+      throw err;
+    }
+
+    // ── ORM write ────────────────────────────────────────────────────────
     const record = await this.model.findOrFail(id);
-    return record.update(this._sanitise(data));
+    await record.update(data);
+
+    // ── after_save ───────────────────────────────────────────────────────
+    await HookPipeline.run(
+      'after_save',
+      { record, user: ctx.user || null, isNew: false, resource: this },
+      this,
+      AdminHooks,
+    );
+
+    return record;
   }
 
   /**
    * Delete a record.
+   * Fires before_delete (can abort by throwing) and after_delete hooks.
+   *
+   * @param {*}      id    — primary key
+   * @param {object} [ctx] — { user, resource } injected by Admin.js handler
    */
-  static async destroy(id) {
-    return this.model.destroy(id);
+  static async destroy(id, ctx = {}) {
+    // Load the record first so before_delete hooks can inspect it
+    const record = await this.model.findOrFail(id);
+
+    // ── before_delete ────────────────────────────────────────────────────
+    await HookPipeline.run(
+      'before_delete',
+      { record, user: ctx.user || null, resource: this },
+      this,
+      AdminHooks,
+    );
+
+    // ── ORM delete ───────────────────────────────────────────────────────
+    await this.model.destroy(id);
+
+    // ── after_delete ─────────────────────────────────────────────────────
+    await HookPipeline.run(
+      'after_delete',
+      { id, record, user: ctx.user || null, resource: this },
+      this,
+      AdminHooks,
+    );
   }
 
   // ─── Internal ─────────────────────────────────────────────────────────────
 
-  static _sanitise(data) {
-    // Remove private/system fields
+  /**
+   * Sanitise and type-coerce raw HTML form data before passing to the ORM.
+   *
+   * HTML forms submit everything as strings. Without coercion:
+   *   - checkboxes come in as 'on' or missing entirely (not false)
+   *   - numbers come in as '42' (string), breaking integer/decimal columns
+   *   - nullable fields come in as '' (empty string) instead of null
+   *   - booleans come in as 'true'/'false' strings
+   *
+   * This method reads the model's field definitions and coerces each value
+   * to the correct type before the ORM sees it.
+   *
+   * @param {object} data   — raw req.body
+   * @param {object} [model] — optional model class override (defaults to this.model)
+   */
+  static _sanitise(data, model) {
     const clean = { ...data };
+
+    // Strip system / framework fields — never write these
     delete clean.id;
     delete clean._method;
     delete clean._token;
+    delete clean._csrf;
+    delete clean._submit;
+
+    // Get the merged field map for type coercion
+    const M = model || this.model;
+    const fieldMap = M
+      ? (typeof M.getFields === 'function' ? M.getFields() : (M.fields || {}))
+      : {};
+
+    // ── Boolean fields: checkbox sends 'on' when checked, nothing when unchecked ──
+    // We must explicitly set false for unchecked boxes because the key is absent.
+    for (const [name, def] of Object.entries(fieldMap)) {
+      if (def && def.type === 'boolean') {
+        const raw = clean[name];
+        if (raw === undefined || raw === null || raw === '') {
+          // Unchecked checkbox — HTML sends nothing, default to false
+          clean[name] = false;
+        } else if (raw === 'on' || raw === '1' || raw === 'true' || raw === true) {
+          clean[name] = true;
+        } else if (raw === '0' || raw === 'false' || raw === false) {
+          clean[name] = false;
+        } else {
+          clean[name] = Boolean(raw);
+        }
+      }
+    }
+
+    // ── Coerce remaining types ────────────────────────────────────────────────
+    for (const [key, raw] of Object.entries(clean)) {
+      const def = fieldMap[key];
+      if (!def) continue; // unknown field — leave as-is, ORM will reject if invalid
+
+      switch (def.type) {
+        case 'integer':
+        case 'bigInteger': {
+          if (raw === '' || raw === null || raw === undefined) {
+            clean[key] = def.nullable ? null : 0;
+          } else {
+            const n = parseInt(raw, 10);
+            clean[key] = isNaN(n) ? (def.nullable ? null : 0) : n;
+          }
+          break;
+        }
+        case 'float':
+        case 'decimal': {
+          if (raw === '' || raw === null || raw === undefined) {
+            clean[key] = def.nullable ? null : 0;
+          } else {
+            const n = parseFloat(raw);
+            clean[key] = isNaN(n) ? (def.nullable ? null : 0) : n;
+          }
+          break;
+        }
+        case 'boolean':
+          // Already handled above
+          break;
+        case 'string':
+        case 'text': {
+          if (raw === '' || raw === undefined) {
+            // Empty string on a nullable field → null; on required field → keep as ''
+            // so the validator can complain rather than silently nulling it
+            clean[key] = def.nullable ? null : '';
+          }
+          break;
+        }
+        case 'json': {
+          if (typeof raw === 'string' && raw.trim() !== '') {
+            try { clean[key] = JSON.parse(raw); } catch { /* leave as string, let validator catch */ }
+          } else if (raw === '' || raw === undefined) {
+            clean[key] = def.nullable ? null : {};
+          }
+          break;
+        }
+        case 'date':
+        case 'timestamp': {
+          if (raw === '' || raw === null || raw === undefined) {
+            clean[key] = def.nullable ? null : undefined;
+            if (clean[key] === undefined) delete clean[key];
+          }
+          break;
+        }
+        case 'id':
+          // Never write id — already deleted above
+          delete clean[key];
+          break;
+        default:
+          // string-like fields: leave as-is
+      }
+    }
+
     return clean;
   }
 
@@ -294,6 +445,75 @@ class AdminResource {
 
   static _getLabelSingular() {
     return this.labelSingular || this.model?.name || 'Record';
+  }
+
+  // ─── Per-user permission resolution ───────────────────────────────────────
+
+  /**
+   * Resolve whether `user` has `action` permission for this resource.
+   *
+   * action: 'view' | 'add' | 'change' | 'delete'
+   *
+   * Rules (Django-matching):
+   *   1. Superusers (is_superuser=true) always get true.
+   *   2. The static boolean flag (canView/canCreate/canEdit/canDelete) is
+   *      the class-level default — if false, nobody gets in regardless.
+   *   3. Non-superuser staff check user.permissions — a JSON array of
+   *      permission strings like ['{slug}.view', '{slug}.add', ...].
+   *      An empty/missing permissions array means no access.
+   *
+   * Override this method in a resource subclass for custom logic:
+   *
+   *   static hasPermission(user, action) {
+   *     if (action === 'delete') return false; // nobody can delete
+   *     return super.hasPermission(user, action);
+   *   }
+   *
+   * @param {object|null} user   — req.adminUser (live User model instance)
+   * @param {string}      action — 'view'|'add'|'change'|'delete'
+   * @returns {boolean}
+   */
+  static hasPermission(user, action) {
+    // Map action → static boolean flag
+    const flagMap = {
+      view:   'canView',
+      add:    'canCreate',
+      change: 'canEdit',
+      delete: 'canDelete',
+    };
+    const flag = flagMap[action];
+
+    // Class-level hard disable — applies to everyone including superusers
+    if (flag && this[flag] === false) return false;
+
+    // No user context (auth disabled) — fall back to static flag
+    if (!user) return flag ? this[flag] !== false : true;
+
+    // Superusers bypass all per-user permission checks
+    if (user.is_superuser || user.is_superuser === 1) return true;
+
+    // Non-superuser staff — check permissions array
+    // Format: '{slug}.{action}'  e.g. 'users.view', 'posts.add'
+    const permKey = `${this.slug}.${action}`;
+    const userPerms = this._parsePermissions(user.permissions);
+    return userPerms.has(permKey);
+  }
+
+  /**
+   * Parse user.permissions into a Set of permission strings.
+   * Handles: JSON string, plain array, comma-separated string, null/undefined.
+   */
+  static _parsePermissions(raw) {
+    if (!raw) return new Set();
+    try {
+      if (Array.isArray(raw)) return new Set(raw);
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed.startsWith('[')) return new Set(JSON.parse(trimmed));
+        return new Set(trimmed.split(',').map(s => s.trim()).filter(Boolean));
+      }
+    } catch {}
+    return new Set();
   }
 }
 
@@ -336,6 +556,27 @@ class AdminField {
   static phone(name)                { return new AdminField(name, 'phone'); }
   static color(name)                { return new AdminField(name, 'color'); }
   static richtext(name)             { return new AdminField(name, 'richtext'); }
+
+  /**
+   * FK relation field — renders as a searchable select.
+   * resourceSlug: the admin resource slug to fetch options from.
+   *   AdminField.fk('user_id', 'users').label('User')
+   */
+  static fk(name, resourceSlug) {
+    const f = new AdminField(name, 'fk');
+    f._fkResource = resourceSlug || null;
+    return f;
+  }
+
+  /**
+   * M2M relation field — renders as a dual-list widget.
+   *   AdminField.m2m('tags', 'tags').label('Tags')
+   */
+  static m2m(name, resourceSlug) {
+    const f = new AdminField(name, 'm2m');
+    f._m2mResource = resourceSlug || null;
+    return f;
+  }
 
   static select(name, options) {
     const f = new AdminField(name, 'select');
@@ -400,6 +641,15 @@ class AdminField {
    *  e.g. AdminField.text('slug').prepopulate('title')
    */
   prepopulate(src)   { this._prepopulate = src;    return this; }
+  /**
+   * Scope the FK dropdown to records matching these constraints.
+   * Accepts a plain object (col = val pairs) or a function for advanced queries.
+   *
+   *   AdminField.fk('tenant_id',  'users').where({ role: 'tenant' })
+   *   AdminField.fk('landlord_id','users').where({ role: 'landlord', is_active: true })
+   *   AdminField.fk('user_id',    'users').where(q => q.whereIn('role', ['admin', 'moderator']))
+   */
+  where(constraints) { this._fkWhere = constraints; return this; }
 
   // ─── Serialise ─────────────────────────────────────────────────────────────
 
@@ -423,6 +673,9 @@ class AdminField {
       min:         this._min,
       max:         this._max,
       isLink:      this._isLink      || false,
+      fkResource:  this._fkResource  || null,
+      fkWhere:     this._fkWhere     || null,
+      m2mResource: this._m2mResource || null,
       prepopulate: this._prepopulate || null,
     };
   }
@@ -440,6 +693,33 @@ class AdminField {
   }
 
   static fromModelField(name, fieldDef) {
+    // Normalise first — raw FieldDefinition from fields.ForeignKey() has
+    // _isForeignKey=true but references=null until normaliseField resolves
+    // _fkModel into { table, column, onDelete }. Without this, fkResource
+    // is always null and the dropdown never loads.
+    const def = normaliseField(fieldDef);
+
+    // ── FK / M2M detection ────────────────────────────────────────────────
+    // ForeignKey fields are integer type but carry _isForeignKey flag.
+    // ManyToMany fields carry _isManyToMany flag.
+    if (def._isManyToMany) {
+      const f = AdminField.m2m(name, null);
+      f._nullable = true;
+      return f;
+    }
+    if (def._isForeignKey) {
+      // Django convention: declared as 'landlord' → DB column 'landlord_id'.
+      const colName = name.endsWith('_id') ? name : name + '_id';
+
+      // references.table is now resolved by normaliseField (e.g. 'users')
+      const resourceSlug = def.references?.table || null;
+
+      const f = AdminField.fk(colName, resourceSlug);
+      f._label = _toLabel(name);
+      if (def.nullable) f._nullable = true;
+      return f;
+    }
+
     const typeMap = {
       id:         () => AdminField.id(name),
       string:     () => AdminField.text(name),
@@ -547,7 +827,10 @@ class AdminInline {
 
   /** Serialise to plain object for template rendering. */
   toJSON() {
-    const modelFields = this.model?.fields || {};
+    // Use getFields() for merged inheritance support; fall back to .fields
+    const modelFields = typeof this.model?.getFields === 'function'
+      ? this.model.getFields()
+      : (this.model?.fields || {});
     const displayFields = this.fields.length
       ? this.fields
       : Object.keys(modelFields).slice(0, 6);
@@ -564,6 +847,19 @@ class AdminInline {
       })),
     };
   }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Convert a snake_case field name to a Title Case label.
+ * 'landlord_id' → 'Landlord', 'user_id' → 'User', 'created_at' → 'Created At'
+ */
+function _toLabel(name) {
+  return name
+    .replace(/_id$/, '')           // strip _id suffix
+    .replace(/_/g, ' ')            // underscores → spaces
+    .replace(/\w/g, c => c.toUpperCase()); // Title Case
 }
 
 module.exports = { AdminResource, AdminField, AdminFilter, AdminInline };

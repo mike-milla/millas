@@ -1,0 +1,53 @@
+{#
+  partials/form-field.njk
+  Renders a single editable form field — all widget types.
+  Expects in scope: field, val, hasError, isEdit, record, errors, adminPrefix
+#}
+
+{# ── Fieldset heading ── #}
+{% if field._isFieldset %}
+<div class="full" style="grid-column:1/-1;margin-top:8px">
+  <div class="fieldset-heading">{{ field.label }}</div>
+</div>
+
+{# ── Readonly ── #}
+{% elif field.isReadonly %}
+{% include "partials/form-readonly.njk" %}
+
+{# ── Editable ── #}
+{% else %}
+{% set val = record[field.name] if record[field.name] is defined else '' %}
+{% set hasError = errors[field.name] is defined %}
+<div class="form-group
+  {% if field.span == 'full' %}full
+  {% elif field.span == 'third' %}w-third
+  {% elif field.type == 'textarea' or field.type == 'json' or field.type == 'richtext' %}full
+  {% elif field.type == 'checkbox' %}w-third
+  {% endif %}"
+  data-field="{{ field.name }}">
+
+  {# Label (not shown for checkbox — toggle has its own) #}
+  {% if field.type != 'checkbox' %}
+  <label class="form-label" for="field-{{ field.name }}">
+    {{ field.label }}
+    {% if not field.nullable %}<span class="required">*</span>{% endif %}
+  </label>
+  {% endif %}
+
+  {% include "partials/form-widget.njk" %}
+
+  {# Error / help #}
+  <div class="field-feedback" id="feedback-{{ field.name }}"
+    {% if field.help %}data-help="{{ field.help }}"{% endif %}>
+    {% if hasError %}
+    <span class="form-error">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      {{ errors[field.name][0] if errors[field.name] is iterable else errors[field.name] }}
+    </span>
+    {% elif field.help %}
+    <span class="form-help">{{ field.help }}</span>
+    {% endif %}
+  </div>
+
+</div>
+{% endif %}
