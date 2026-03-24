@@ -43,6 +43,7 @@ const Storage     = require('../storage/Storage');
 const LocalDriver = require('../storage/drivers/LocalDriver');
 // ── Serializer ────────────────────────────────────────────────────
 const { Serializer } = require('../serializer/Serializer');
+const {Str, FluentString} = require("../support/Str");
 
 module.exports = {
   // ── Millas HTTP layer ──────────────────────────────────────────
@@ -60,5 +61,7 @@ module.exports = {
   Storage, LocalDriver, StorageServiceProvider,
   // Serializer
   Serializer,
+  // Support
+  Str, FluentString,
   Log: require('../logger').Log,
 };

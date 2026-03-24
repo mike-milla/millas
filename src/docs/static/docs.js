@@ -79,26 +79,76 @@ function _saveEnvs() {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
+// Track what's been initially mounted
+let _appMounted = false;
+
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
 
-  const m = state.manifest;
+  const m     = state.manifest;
   const title = m ? m.title : 'API Docs';
 
-  app.innerHTML = `
-    <aside class="sidebar">
-      ${renderSidebar(m, title)}
-    </aside>
-    <div class="main">
-      ${renderEnvBar()}
-      <div class="detail">
-        ${renderDetail()}
+  // ── Initial mount — build the shell once ─────────────────────────────────
+  if (!_appMounted) {
+    app.innerHTML = `
+      <aside class="sidebar">
+        ${renderSidebar(m, title)}
+      </aside>
+      <div class="main">
+        ${renderEnvBar()}
+        <div class="detail">
+          ${renderDetail()}
+        </div>
       </div>
-    </div>
-  `;
+    `;
+    _appMounted = true;
+    bindEvents();
+    return;
+  }
 
-  bindEvents();
+  // ── Subsequent renders — surgical updates only ────────────────────────────
+
+  // 1. Sidebar: only rebuild when manifest or search changes (group open/close, search)
+  //    but NOT on endpoint selection — just swap the active class instead
+  const sidebarEl = app.querySelector('.sidebar');
+
+  if (state._sidebarDirty) {
+    const savedScrollTop = app.querySelector('.sidebar-scroll')?.scrollTop || 0;
+    if (sidebarEl) sidebarEl.innerHTML = renderSidebar(m, title);
+    const newScroll = app.querySelector('.sidebar-scroll');
+    if (newScroll && savedScrollTop) newScroll.scrollTop = savedScrollTop;
+    state._sidebarDirty = false;
+    bindSidebarEvents();
+  } else {
+    // Just swap the active class — no DOM rebuild, no scroll reset
+    app.querySelectorAll('.sidebar-ep').forEach(el => {
+      const [path, verb] = (el.dataset.ep || '').split('|');
+      const isActive = state.activeEp &&
+                       state.activeEp.group === el.dataset.group &&
+                       state.activeEp.ep    === path + verb;
+      el.classList.toggle('active', isActive);
+    });
+  }
+
+  // 2. Detail panel: always update when render() is called after initial mount
+  const detailEl = app.querySelector('.detail');
+  if (detailEl) {
+    detailEl.innerHTML = renderDetail();
+    bindDetailEvents();
+  }
+
+  // 3. Env bar: only update on env changes
+  if (state._envDirty) {
+    const envBar = app.querySelector('.env-bar');
+    if (envBar) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = renderEnvBar();
+      envBar.replaceWith(tmp.firstElementChild);
+    }
+    state._envDirty = false;
+    bindEnvEvents();
+  }
 }
 
 function renderSidebar(m, title) {
@@ -701,20 +751,54 @@ function renderCodeSnippets(ep) {
 // ── Events ─────────────────────────────────────────────────────────────────────
 
 function bindEvents() {
-  // Search
+  bindSidebarEvents();
+  bindEnvEvents();
+  bindDetailEvents();
+}
+
+function bindSidebarEvents() {
   const search = document.getElementById('search-input');
   if (search) {
-    search.addEventListener('input', e => { state.search = e.target.value; render(); });
+    search.addEventListener('input', e => {
+      state.search = e.target.value;
+      state._sidebarDirty = true;
+      render();
+    });
   }
 
-  // Env bar
-  // Environment selector
+  document.querySelectorAll('.sidebar-group-header').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.toggle);
+      if (!state.openGroups) state.openGroups = new Set();
+      if (state.openGroups.has(idx)) state.openGroups.delete(idx);
+      else state.openGroups.add(idx);
+      state._sidebarDirty = true;
+      render();
+    });
+  });
+
+  document.querySelectorAll('.sidebar-ep').forEach(el => {
+    el.addEventListener('click', () => {
+      const [path, verb] = el.dataset.ep.split('|');
+      state.activeEp    = { group: el.dataset.group, ep: path + verb };
+      state.response    = null;
+      state.bodyMode    = 'form';
+      const savedKey    = `fields:${verb}:${path}`;
+      state.fieldValues = JSON.parse(localStorage.getItem(savedKey) || '{}');
+      // No _sidebarDirty — active class is swapped in-place, scroll untouched
+      render();
+    });
+  });
+}
+
+function bindEnvEvents() {
   const envSelect = document.getElementById('env-select');
   if (envSelect) {
     envSelect.addEventListener('change', e => {
       state.activeEnvIdx = parseInt(e.target.value);
       _syncEnvFromActive();
       _saveEnvs();
+      state._envDirty = true;
       render();
     });
   }
@@ -722,7 +806,6 @@ function bindEvents() {
   const envManageBtn = document.getElementById('env-manage-btn');
   if (envManageBtn) {
     envManageBtn.addEventListener('click', () => {
-      // Open environment manager using the shared UI.Modal from admin
       if (state._envModal) { state._envModal.close(); return; }
       _openEnvModal();
     });
@@ -751,91 +834,17 @@ function bindEvents() {
     });
   }
 
-  // Group toggles
-  document.querySelectorAll('.sidebar-group-header').forEach(el => {
-    el.addEventListener('click', () => {
-      const idx  = parseInt(el.dataset.toggle);
-      const open = !state.openGroups;
-      if (!state.openGroups) state.openGroups = new Set();
-      if (state.openGroups.has(idx)) state.openGroups.delete(idx);
-      else state.openGroups.add(idx);
-      render();
-    });
-  });
-
-  // Endpoint selection
-  document.querySelectorAll('.sidebar-ep').forEach(el => {
-    el.addEventListener('click', () => {
-      const [path, verb] = el.dataset.ep.split('|');
-      state.activeEp   = { group: el.dataset.group, ep: path + verb };
-      state.response   = null;
-      state.bodyMode   = 'form';   // reset to form view on each endpoint
-      // Load saved field values for this endpoint
-      const savedKey   = `fields:${verb}:${path}`;
-      state.fieldValues = JSON.parse(localStorage.getItem(savedKey) || '{}');
-      render();
-    });
-  });
-
-  // Field inputs
-  document.querySelectorAll('[data-key]').forEach(el => {
-    el.addEventListener('input', e => {
-      const key = e.target.dataset.key;
-      const isCheckbox = e.target.type === 'checkbox';
-      state.fieldValues[key] = isCheckbox ? e.target.checked : e.target.value;
-      // Save to localStorage
-      const ep = getActiveEp();
-      if (ep) {
-        const savedKey = `fields:${ep.verb}:${ep.path}`;
-        localStorage.setItem(savedKey, JSON.stringify(state.fieldValues));
-      }
-      // Re-render URL bar only
-      const tryUrl = document.getElementById('try-url');
-      if (tryUrl && ep) tryUrl.value = buildUrl(ep);
-    });
-  });
-
-  // Try it
-  const tryBtn = document.getElementById('try-btn');
-  if (tryBtn) {
-    tryBtn.addEventListener('click', sendRequest);
-  }
-
-  // Copy response
-  const copyBtn = document.getElementById('copy-response');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      const pre = document.getElementById('response-body');
-      if (pre) {
-        navigator.clipboard.writeText(pre.textContent);
-        UI.Toast.show('Response copied to clipboard', 'success', 2000);
-      }
-    });
-  }
-
-  // Code tabs
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.activeTab = btn.dataset.tab;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === state.activeTab));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === state.activeTab));
-    });
-  });
-
-  // Export
   const exportPostman = document.getElementById('export-postman');
   if (exportPostman) {
     exportPostman.addEventListener('click', () => {
-      const url = `${PREFIX}/_api/export/postman?baseUrl=${encodeURIComponent(state.env.baseUrl)}`;
-      window.open(url, '_blank');
+      window.open(`${PREFIX}/_api/export/postman?baseUrl=${encodeURIComponent(state.env.baseUrl)}`, '_blank');
     });
   }
 
   const exportOpenApi = document.getElementById('export-openapi');
   if (exportOpenApi) {
     exportOpenApi.addEventListener('click', () => {
-      const url = `${PREFIX}/_api/export/openapi?baseUrl=${encodeURIComponent(state.env.baseUrl)}`;
-      window.open(url, '_blank');
+      window.open(`${PREFIX}/_api/export/openapi?baseUrl=${encodeURIComponent(state.env.baseUrl)}`, '_blank');
     });
   }
 }
@@ -943,12 +952,6 @@ function bindDetailEvents() {
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === state.activeTab));
     });
   });
-
-  const exportPostman = document.getElementById('export-postman');
-  if (exportPostman) exportPostman.addEventListener('click', () => window.open(`${PREFIX}/_api/export/postman?baseUrl=${encodeURIComponent(state.env.baseUrl)}`, '_blank'));
-
-  const exportOpenApi = document.getElementById('export-openapi');
-  if (exportOpenApi) exportOpenApi.addEventListener('click', () => window.open(`${PREFIX}/_api/export/openapi?baseUrl=${encodeURIComponent(state.env.baseUrl)}`, '_blank'));
 
   // Body mode toggle
   document.querySelectorAll('.mode-btn').forEach(btn => {

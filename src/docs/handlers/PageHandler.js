@@ -39,7 +39,7 @@ function _shell(title, prefix, adminPrefix) {
   <div id="app" data-prefix="${prefix}" data-admin-prefix="${adminPrefix}"></div>
   <!-- ui.js from admin — Portal, Modal, Drawer, Toast, Confirm, Tooltip, Dropdown -->
   <script src="${adminPrefix}/static/ui.js"></script>
-  <script src="${prefix}/static/docs.js?v=9"></script>
+  <script src="${prefix}/static/docs.js?v=10"></script>
 </body>
 </html>`;
 }
