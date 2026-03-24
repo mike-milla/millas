@@ -304,7 +304,9 @@ class Application {
         this._container.instance('url', urlGenerator);
 
         const { HashManager } = require('../hashing/Hash');
-        const hashManager = new HashManager({ default: 'bcrypt', bcrypt: { rounds: 12 } });
+        let _hashRounds = 12;
+        try { const _appCfg = require(basePath + '/config/app'); if (_appCfg.hashing?.rounds) _hashRounds = _appCfg.hashing.rounds; } catch {}
+        const hashManager = new HashManager({ default: 'bcrypt', bcrypt: { rounds: _hashRounds } });
         this._container.instance('hash', hashManager);
 
         const ProcessManager = require('../process/Process').ProcessManager;

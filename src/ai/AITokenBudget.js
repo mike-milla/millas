@@ -31,7 +31,7 @@
  *   Route.post('/ai/chat', [
  *     AITokenBudget.perUser({ daily: 100_000 }).middleware(),
  *   ], async (req) => {
- *     const res = await AI.chat(req.validated.message, { userId: req.user.id });
+ *     const res = await AI.chat(body.message, { userId: user.id });
  *     await req.deductTokens(res.totalTokens);   // <-- deduct after response
  *     return jsonify({ reply: res.text });
  *   });

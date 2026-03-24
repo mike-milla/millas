@@ -222,46 +222,22 @@ class MillasRequest {
     return this._req.secure || false;
   }
 
-  // ─── Validation ─────────────────────────────────────────────────────────────
+  // ─── Validation (escape hatch) ───────────────────────────────────────────────
 
   /**
-   * Validate request input against rules.
-   * Throws a 422 ValidationError on failure.
-   * Returns the validated + type-coerced data subset on success.
+   * Validate input against a typed schema.
+   * Prefer using body.validate() in handlers, or .shape() on routes.
+   *
+   *   const { string, email } = require('millas/core/validation');
    *
    *   const data = await req.validate({
-   *     name:     'required|string|min:2|max:100',
-   *     email:    'required|email',
-   *     password: 'required|string|min:8',
-   *     age:      'optional|number|min:13',
-   *   });
-   *
-   * For route-level validation (runs before the handler, result in req.validated):
-   *
-   *   Route.post('/register', {
-   *     validate: {
-   *       email:    'required|email',
-   *       password: 'required|string|min:8',
-   *     },
-   *   }, async (req) => {
-   *     const { email, password } = req.validated;
+   *     name:  string().required().max(100),
+   *     email: email().required(),
    *   });
    */
   async validate(rules) {
     const { Validator } = require('../validation/Validator');
     return Validator.validate(this.all(), rules);
-  }
-
-  /**
-   * The validated + coerced input — populated by route-level validation middleware.
-   * Null if no route-level validation was declared for this route.
-   *
-   *   Route.post('/login', { validate: { email: 'required|email' } }, async (req) => {
-   *     req.validated.email  // guaranteed valid email string
-   *   });
-   */
-  get validated() {
-    return this._req.validated ?? null;
   }
 
   // ─── CSRF ────────────────────────────────────────────────────────────────────

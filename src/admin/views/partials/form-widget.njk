@@ -95,8 +95,8 @@
       <select class="form-control" size="6" id="m2m-available-{{ field.name }}" style="width:100%" multiple></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;padding-top:24px">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="m2mMove('{{ field.name }}','available','chosen')">→</button>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="m2mMove('{{ field.name }}','chosen','available')">←</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-m2m-move data-m2m-field="{{ field.name }}" data-m2m-from="available" data-m2m-to="chosen">→</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-m2m-move data-m2m-field="{{ field.name }}" data-m2m-from="chosen" data-m2m-to="available">←</button>
     </div>
     <div style="flex:1">
       <div class="form-label" style="font-size:11px;color:var(--text-soft)">Chosen</div>
@@ -141,14 +141,14 @@
 {% elif field.type == 'richtext' %}
 <div class="richtext-wrap">
   <div class="richtext-toolbar">
-    <button type="button" onclick="rtCmd('bold')" title="Bold"><b>B</b></button>
-    <button type="button" onclick="rtCmd('italic')" title="Italic"><i>I</i></button>
-    <button type="button" onclick="rtCmd('underline')" title="Underline"><u>U</u></button>
+    <button type="button" data-rt-cmd="bold" title="Bold"><b>B</b></button>
+    <button type="button" data-rt-cmd="italic" title="Italic"><i>I</i></button>
+    <button type="button" data-rt-cmd="underline" title="Underline"><u>U</u></button>
     <span class="rt-sep"></span>
-    <button type="button" onclick="rtCmd('insertUnorderedList')" title="Bullet list">≡</button>
-    <button type="button" onclick="rtCmd('insertOrderedList')" title="Numbered list">1.</button>
+    <button type="button" data-rt-cmd="insertUnorderedList" title="Bullet list">≡</button>
+    <button type="button" data-rt-cmd="insertOrderedList" title="Numbered list">1.</button>
     <span class="rt-sep"></span>
-    <button type="button" onclick="rtLink()" title="Link">🔗</button>
+    <button type="button" data-rt-link title="Link">🔗</button>
   </div>
   <div id="rt-{{ field.name }}" class="richtext-editor form-control{% if hasError %} error{% endif %}"
     contenteditable="true"
@@ -159,13 +159,13 @@
 {# ── Password ── #}
 {% elif field.type == 'password' %}
 <div style="position:relative">
-  <input type="password" id="field-{{ field.name }}" name="{{ field.name }}"
+  <input autocomplete="new-password" type="password" id="field-{{ field.name }}" name="{{ field.name }}"
     class="form-control{% if hasError %} error{% endif %}"
     placeholder="{{ 'Leave blank to keep current' if isEdit else '' }}"
     {% if not field.nullable and not isEdit %}data-required="true"{% endif %}
     style="padding-right:40px">
   <button type="button" class="pw-toggle"
-    onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'">
+    data-pw-toggle>
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
     </svg>

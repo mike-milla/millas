@@ -1,7 +1,7 @@
 'use strict';
 
 const { createFacade } = require('./Facade');
-const { MailMessage, TemplateEngine, SmtpDriver, SendGridDriver, MailgunDriver, LogDriver, MailServiceProvider } = require('../core');
+// const { MailMessage, TemplateEngine, SmtpDriver, SendGridDriver, MailgunDriver, LogDriver, MailServiceProvider } = require('../core');
 
 /**
  * Mail facade.

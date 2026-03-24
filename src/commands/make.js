@@ -1,7 +1,7 @@
 'use strict';
 
 const chalk = require('chalk');
-const { makeController, makeModel, makeMiddleware, makeService, makeJob, makeMigration } = require('../scaffold/maker');
+const { makeController, makeModel, makeMiddleware, makeService, makeJob, makeMigration, makeShape } = require('../scaffold/maker');
 
 module.exports = function (program) {
 
@@ -47,6 +47,13 @@ module.exports = function (program) {
     .description('Generate a blank migration file')
     .action(async (name) => {
       await run('Migration', () => makeMigration(name));
+    });
+
+  program
+    .command('make:shape <n>')
+    .description('Generate a shape file with Create/Update contracts (app/shapes/)')
+    .action(async (name) => {
+      await run('Shape', () => makeShape(name));
     });
 };
 

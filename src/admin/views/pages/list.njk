@@ -65,7 +65,7 @@
 
     <div class="toolbar-right">
       {% if filters | length %}
-      <button class="btn btn-ghost btn-sm" onclick="toggleFilters()" id="filter-toggle">
+      <button class="btn btn-ghost btn-sm" id="filter-toggle">
         <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-filter"/></svg></span>
         Filters
         {% if activeFilters | length %}
@@ -100,18 +100,18 @@
     <span class="bulk-count" id="bulk-count">0 selected</span>
     <span class="text-muted" style="font-size:12px">—</span>
     {% for action in resource.actions %}
-    <button class="btn btn-ghost btn-sm" onclick="bulkAction({{ action.index }})">
+    <button class="btn btn-ghost btn-sm" data-bulk-action="{{ action.index }}">
       {% if action.icon %}<span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-{{ action.icon }}"/></svg></span>{% endif %}
       {{ action.label }}
     </button>
     {% endfor %}
     {% if resource.canDelete %}
-    <button class="btn btn-ghost btn-sm btn-danger" onclick="bulkDelete()">
+    <button class="btn btn-ghost btn-sm btn-danger" id="bulk-delete-btn">
       <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
       Delete selected
     </button>
     {% endif %}
-    <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">
+    <button class="btn btn-ghost btn-sm" style="margin-left:auto" id="clear-selection">
       <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg></span>
       Cancel
     </button>
@@ -171,7 +171,7 @@
       <thead>
         <tr>
           <th class="col-check">
-            <input type="checkbox" class="row-check" id="check-all" onchange="toggleAll(this)" title="Select all">
+            <input type="checkbox" class="row-check" id="check-all" title="Select all">
           </th>
           {% for field in listFields %}
           {% set isSorted = sort == field.name %}
@@ -323,196 +323,14 @@
   </div>
 </div>
 
+{% block scripts %}
 <script>
-  $(function() {
-    var PREFIX = '{{ adminPrefix }}';
-    var SLUG   = '{{ resource.slug }}';
-
-    // ── Filter panel ─────────────────────────────────────────────────────────
-    {% if activeFilters | length %}$('#filter-panel').show();{% endif %}
-
-    window.toggleFilters = function() {
-      $('#filter-panel').toggle();
-    };
-
-    // ── Live search on Enter ──────────────────────────────────────────────────
-    $('#search-form input[name="search"]').on('keydown', function(e) {
-      if (e.key === 'Enter') $('#search-form').submit();
-    });
-
-    // ── Bulk selection ────────────────────────────────────────────────────────
-    function updateBulkBar() {
-      var $checked = $('.item-check:checked');
-      var n        = $checked.length;
-      var total    = $('.item-check').length;
-      $('#bulk-bar').toggleClass('visible', n > 0);
-      $('#bulk-count').text(n + ' selected');
-      $('#check-all').prop('indeterminate', n > 0 && n < total)
-                     .prop('checked',       n > 0 && n === total);
-    }
-
-    window.toggleAll = function(master) {
-      $('.item-check').prop('checked', master.checked);
-      updateBulkBar();
-    };
-
-    window.clearSelection = function() {
-      $('.item-check, #check-all').prop('checked', false).prop('indeterminate', false);
-      updateBulkBar();
-    };
-
-    $(document).on('change', '.item-check', updateBulkBar);
-
-    window.bulkDelete = function() {
-      var ids   = $('.item-check:checked').map(function() { return this.value; }).get();
-      if (!ids.length) return;
-      var label = ids.length + ' record' + (ids.length > 1 ? 's' : '');
-      confirmDeleteBulk(PREFIX + '/' + SLUG + '/bulk-delete', label, ids);
-    };
-
-    window.confirmDeleteBulk = function(url, label, ids) {
-      UI.Confirm.show({
-        title:   'Delete ' + label,
-        message: 'Delete <strong>' + label + '</strong>? This cannot be undone.',
-        confirm: 'Delete',
-        danger:  true,
-      }).then(function(ok) {
-        if (!ok) return;
-        var csrf = $('meta[name="csrf-token"]').attr('content') || '';
-        var $form = $('<form method="POST">').attr('action', url);
-        $form.append('<input name="_csrf" value="' + csrf + '">');
-        $.each(ids, function(_, id) {
-          $form.append('<input type="hidden" name="ids[]" value="' + id + '">');
-        });
-        $form.appendTo('body').submit();
-      });
-    };
-
-    window.bulkAction = function(actionIndex) {
-      var ids = $('.item-check:checked').map(function() { return this.value; }).get();
-      if (!ids.length) return;
-      var csrf = $('meta[name="csrf-token"]').attr('content') || '';
-      var $form = $('<form method="POST">').attr('action', PREFIX + '/' + SLUG + '/bulk-action');
-      $form.append('<input name="_csrf" value="' + csrf + '">');
-      $form.append('<input type="hidden" name="actionIndex" value="' + actionIndex + '">');
-      $.each(ids, function(_, id) {
-        $form.append('<input type="hidden" name="ids[]" value="' + id + '">');
-      });
-      $form.appendTo('body').submit();
-    };
-
-    // ── UI.Dropdown — portal-rendered action menus ────────────────────────────
-    // Wire export menu
-    var $exportBtn   = $('#export-menu-btn');
-    var $exportPanel = $('#export-menu-panel');
-    if ($exportBtn.length && $exportPanel.length) {
-      var exportDd = UI.Dropdown.create({
-        anchor:    $exportBtn[0],
-        content:   $exportPanel[0],
-        placement: 'bottom-end',
-        offset:    4,
-      });
-      $exportBtn.on('click', function() { exportDd.toggle(); });
-    }
-
-    // Wire per-row action menus
-    $('.ui-menu').each(function() {
-      var $menu  = $(this);
-      var $btn   = $menu.find('.ui-menu-trigger');
-      var $panel = $menu.find('.ui-menu-panel');
-      if (!$btn.length || !$panel.length) return;
-
-      var dd = UI.Dropdown.create({
-        anchor:    $btn[0],
-        content:   $panel[0],
-        placement: 'bottom-end',
-        offset:    4,
-      });
-
-      $btn.on('click', function(e) {
-        e.stopPropagation();
-        dd.toggle();
-      });
-
-      $panel.find('[data-confirm-delete]').on('click', function() {
-        dd.close();
-        confirmDelete($(this).data('confirm-delete'), $(this).data('confirm-label'));
-      });
-
-      $panel.find('[data-row-action]').on('click', function() {
-        dd.close();
-        var url   = $(this).data('row-action');
-        var label = $(this).data('row-action-label');
-        UI.Confirm.show({
-          title:   label,
-          message: 'Run <strong>' + label + '</strong> on this record?',
-          confirm: label,
-        }).then(function(ok) {
-          if (!ok) return;
-          var csrf = $('meta[name="csrf-token"]').attr('content') || '';
-          var $form = $('<form method="POST">').attr('action', url);
-          $form.append('<input name="_csrf" value="' + csrf + '">');
-          $form.appendTo('body').submit();
-        });
-      });
-
-      // ── Right-click on the row opens a context menu at the cursor ──────────
-      (function($menuPanel) {
-        var $row = $menuPanel.closest('tr');
-
-        $row.on('contextmenu', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-
-          // Remove any existing portal
-          $('.context-menu-portal').remove();
-
-          // Build a fresh portal from the panel's inner HTML (avoids clone display:none)
-          var $p = $('<div class="ui-menu-panel context-menu-portal"></div>');
-          $p.html($menuPanel.html());
-          $p.css({
-            position: 'fixed',
-            top:      Math.min(e.clientY, window.innerHeight - 240) + 'px',
-            left:     Math.min(e.clientX, window.innerWidth  - 190) + 'px',
-            zIndex:   9999,
-          });
-          $('body').append($p);
-
-          // Wire handlers on the portal
-          $p.find('[data-confirm-delete]').on('click', function() {
-            $p.remove();
-            confirmDelete($(this).data('confirm-delete'), $(this).data('confirm-label'));
-          });
-          $p.find('[data-row-action]').on('click', function() {
-            $p.remove();
-            var _url   = $(this).data('row-action');
-            var _label = $(this).data('row-action-label');
-            UI.Confirm.show({
-              title:   _label,
-              message: 'Run <strong>' + _label + '</strong> on this record?',
-              confirm: _label,
-            }).then(function(ok) {
-              if (!ok) return;
-              var csrf = $('meta[name="csrf-token"]').attr('content') || '';
-              var $form = $('<form method="POST">').attr('action', _url);
-              $form.append('<input name="_csrf" value="' + csrf + '">');
-              $form.appendTo('body').submit();
-            });
-          });
-          $p.find('a.ui-menu-item').on('click', function() { $p.remove(); });
-
-          // Dismiss on next click anywhere or Escape
-          setTimeout(function() {
-            $(document).one('click.ctxmenu', function() { $p.remove(); });
-          }, 0);
-          $(document).one('keydown.ctxmenu', function(ev) {
-            if (ev.key === 'Escape') { $p.remove(); }
-          });
-        });
-      })($panel);
-    });
-  });
+  window.MILLAS_ADMIN_PREFIX      = '{{ adminPrefix }}';
+  window.MILLAS_RESOURCE_SLUG     = '{{ resource.slug }}';
+  window.MILLAS_HAS_ACTIVE_FILTERS = {% if activeFilters | length %}true{% else %}false{% endif %};
 </script>
+<script src="{{ adminPrefix }}/static/actions.js?v=2"></script>
+{% endblock %}
 
 <style>
   /* ── UI Menu (portal dropdown) ── */

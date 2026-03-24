@@ -4,6 +4,7 @@ const chalk    = require('chalk');
 const path     = require('path');
 const fs       = require('fs-extra');
 const readline = require('readline');
+const Hasher   = require('../auth/Hasher');
 
 const Log = require("../logger/internal")
 
@@ -65,8 +66,7 @@ module.exports = function (program) {
 
         // ── Create via Auth.register path but with staff flags ───
         // Hash manually so we can pass the flags in the same create() call.
-        const Hasher = require('../auth/Hasher');
-        const hash   = await Hasher.make(plainPassword);
+        const hash = await Hasher.make(plainPassword);
 
         await User.create({
           email,
@@ -109,8 +109,7 @@ module.exports = function (program) {
         if (plain !== confirm) throw new Error('Passwords do not match.');
         validatePassword(plain);
 
-        const Hasher = require('../auth/Hasher');
-        const hash   = await Hasher.make(plain);
+        const hash = await Hasher.make(plain);
 
         await User.where('id', user.id).update({
           password:   hash,

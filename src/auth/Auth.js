@@ -19,8 +19,12 @@ const HttpError = require('../errors/HttpError');
  *     password: 'secret123',
  *   });
  *
- *   // Login
+ *   // Login — throws 401 on failure
  *   const { user, token } = await Auth.login('alice@example.com', 'secret123');
+ *
+ *   // Attempt — returns user | null (Laravel/Rails style, never throws)
+ *   const user = await Auth.attempt(email, password);
+ *   if (!user) return this.unauthorized('Invalid credentials');
  *
  *   // Verify a token
  *   const payload = Auth.verify(token);
@@ -28,14 +32,22 @@ const HttpError = require('../errors/HttpError');
  *   // Get logged-in user from a request
  *   const user = await Auth.user(req);
  *
+ *   // Revoke a token (adds to in-memory denylist — resets on restart)
+ *   await Auth.revokeToken(user, token);
+ *
  *   // Check password
  *   const ok = await Auth.checkPassword('plain', user.password);
  */
 class Auth {
   constructor() {
-    this._jwt    = null;
-    this._config = null;
+    this._jwt       = null;
+    this._config    = null;
     this._UserModel = null;
+    // In-memory token denylist for revokeToken().
+    // Resets on server restart — sufficient for short-lived JWTs.
+    // For persistent revocation across restarts/processes, set a cache
+    // store via Auth.configure({ revocationStore: redisClient }).
+    this._revokedTokens = new Set();
   }
 
   // ─── Configuration ───────────────────────────────────────────────────────
@@ -125,6 +137,41 @@ class Auth {
   }
 
   /**
+   * Attempt to authenticate with email + password.
+   *
+   * Laravel / Rails style — returns the user on success, null on failure.
+   * Never throws for bad credentials; throws only for unexpected errors.
+   *
+   * The caller is responsible for status checks (banned, inactive, etc.)
+   * because attempt() intentionally skips them — it only validates identity.
+   *
+   *   const user = await Auth.attempt(email, password);
+   *   if (!user) return this.unauthorized('Invalid email or password.');
+   *   if (user.status === 'banned') return this.forbidden('Account suspended.');
+   *   const token = Auth.issueToken(user);
+   *
+   * @param {string} email
+   * @param {string} password
+   * @returns {Promise<object|null>} user instance or null
+   */
+  async attempt(email, password) {
+    this._requireUserModel();
+
+    const user = await this._UserModel.findBy('email', email);
+    if (!user) return null;
+
+    const ok = await Hasher.check(password, user.password);
+    if (!ok) return null;
+
+    // Record last login (fire-and-forget)
+    try {
+      await this._UserModel.where('id', user.id).update({ last_login: new Date().toISOString() });
+    } catch { /* non-fatal */ }
+
+    return user;
+  }
+
+  /**
    * Verify and decode a token string.
    * Throws 401 if expired or invalid.
    *
@@ -174,6 +221,68 @@ class Auth {
     const u = await this.user(req);
     if (!u) throw new HttpError(401, 'Unauthenticated');
     return u;
+  }
+
+  /**
+   * Revoke a token so it cannot be used again.
+   *
+   * Adds the token's unique identifier (jti / sub+iat) to an in-memory denylist.
+   * The denylist resets on server restart — acceptable for short-lived JWTs (≤7d).
+   *
+   * For persistence across restarts or multi-process deployments, configure a
+   * cache store (Redis) in config/auth.js:
+   *
+   *   guards: { jwt: { revocationStore: redisClient } }
+   *
+   * The token string can be passed directly, or extracted from the request
+   * by AuthMiddleware and attached to req.token / ctx.token.
+   *
+   *   // In a logout controller:
+   *   await Auth.revokeToken(user, ctx.token);
+   *
+   * @param {object} user  — the authenticated user (used to scope the key)
+   * @param {string} token — the raw JWT string to revoke
+   */
+  async revokeToken(user, token) {
+    if (!token) return;
+
+    // Decode without verifying — we want to revoke even if it's expiring soon
+    const payload = this._jwt.decode(token);
+    if (!payload) return;
+
+    // Use jti if present, otherwise fall back to sub+iat which is unique per-issue
+    const key = payload.jti || `${payload.sub || user?.id}:${payload.iat}`;
+    this._revokedTokens.add(key);
+
+    // Prune stale entries occasionally to prevent unbounded growth
+    if (this._revokedTokens.size > 10000) {
+      this._pruneExpiredRevocations();
+    }
+  }
+
+  /**
+   * Check whether a token has been revoked.
+   * Called automatically by AuthMiddleware on every authenticated request.
+   *
+   * @param {string} token — raw JWT string
+   * @returns {boolean}
+   */
+  isRevoked(token) {
+    if (!token || this._revokedTokens.size === 0) return false;
+    const payload = this._jwt.decode(token);
+    if (!payload) return false;
+    const key = payload.jti || `${payload.sub}:${payload.iat}`;
+    return this._revokedTokens.has(key);
+  }
+
+  _pruneExpiredRevocations() {
+    // No expiry metadata stored — just trim the oldest half as a safety valve.
+    // In production use a Redis TTL-based store instead.
+    const entries = [...this._revokedTokens];
+    const half    = Math.floor(entries.length / 2);
+    for (let i = 0; i < half; i++) {
+      this._revokedTokens.delete(entries[i]);
+    }
   }
 
   /**

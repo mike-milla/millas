@@ -38,11 +38,11 @@
  *     return jsonify(await User.update(params.id, body));
  *   })
  *
- *   // Inline validation on body
+ *   // Inline validation on body — use typed validators from millas/core/validation
  *   Route.post('/posts', async ({ body }) => {
  *     const data = await body.validate({
- *       title:   'required|string|max:255',
- *       content: 'required|string',
+ *       title:   string().required().max(255),
+ *       content: string().required(),
  *     });
  *     return jsonify(await Post.create(data));
  *   })
@@ -129,12 +129,16 @@ class RequestContext {
 
   /**
    * Build the body object with an attached .validate() method.
-   * This keeps validation ergonomic and co-located with the body itself:
+   *
+   *   const { string, email } = require('millas/core/validation');
    *
    *   const data = await body.validate({
-   *     name:  'required|string|max:100',
-   *     email: 'required|email',
+   *     name:  string().required().max(100),
+   *     email: email().required(),
    *   });
+   *
+   * When a route has .shape({ in: {...} }), validation already ran before
+   * the handler — body is pre-validated and body.validate() is not needed.
    */
   _buildBody(rawBody, millaReq) {
     // Start with the raw body data

@@ -41,6 +41,9 @@ const { CacheServiceProvider, StorageServiceProvider } = require('../providers/C
 // ── Storage ───────────────────────────────────────────────────────
 const Storage     = require('../storage/Storage');
 const LocalDriver = require('../storage/drivers/LocalDriver');
+// ── Serializer ────────────────────────────────────────────────────
+const { Serializer } = require('../serializer/Serializer');
+
 module.exports = {
   // ── Millas HTTP layer ──────────────────────────────────────────
   MillasRequest, MillasResponse, ResponseDispatcher, RequestContext,
@@ -55,5 +58,7 @@ module.exports = {
   Cache, MemoryDriver, FileDriver, NullDriver, CacheServiceProvider,
   // Storage
   Storage, LocalDriver, StorageServiceProvider,
+  // Serializer
+  Serializer,
   Log: require('../logger').Log,
 };

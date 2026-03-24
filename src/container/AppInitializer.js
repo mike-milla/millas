@@ -130,6 +130,23 @@ class AppInitializer {
                 }
             }
 
+            // ── Docs panel ────────────────────────────────────────────────
+            if (cfg.docs !== null && cfg.docs !== undefined) {
+                try {
+                    const Docs = require('../docs/Docs');
+                    // Wire live RouteRegistry now that routes are fully mounted
+                    try {
+                        Docs.setRouteRegistry(this._kernel.route.getRegistry());
+                    } catch {}
+                    if (cfg.docs && Object.keys(cfg.docs).length) {
+                        Docs.configure(cfg.docs);
+                    }
+                    Docs.mount(this._adapter.nativeApp);
+                } catch (err) {
+                    process.stderr.write(`[millas] Docs mount failed: ${err.message}\n`);
+                }
+            }
+
             this._kernel.mountFallbacks();
 
             const server = new HttpServer(this._kernel, {
@@ -175,6 +192,12 @@ class AppInitializer {
         // Requires Auth to be booted first (needs the resolved User model).
         if (cfg.admin !== null && cfg.admin !== undefined) {
             const p = load('../providers/AdminServiceProvider');
+            if (p) providers.push(p);
+        }
+
+        // ── 4b. Docs — on when .withDocs() was called ────────────────────────
+        if (cfg.docs !== null && cfg.docs !== undefined) {
+            const p = load('../docs/DocsServiceProvider');
             if (p) providers.push(p);
         }
 

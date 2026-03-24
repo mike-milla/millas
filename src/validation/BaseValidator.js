@@ -22,6 +22,8 @@ class BaseValidator {
     this._customFns    = [];   // [{ fn: async (value, data) => string|null }]
     this._rules        = [];   // [{ check: fn, message: string }] — added by subclasses
     this._label        = null; // field name, set by Validator before running
+    this._example      = undefined; // docs only — ignored at runtime
+    this._describe     = null;      // docs only — ignored at runtime
   }
 
   // ─── Common modifiers ──────────────────────────────────────────────────────
@@ -85,6 +87,30 @@ class BaseValidator {
    */
   label(name) {
     this._label = name;
+    return this;
+  }
+
+  /**
+   * Set an example value for this field.
+   * Used by the docs panel to pre-fill the "Try it" form.
+   * Completely ignored at runtime — zero cost.
+   *
+   *   string().required().example('Jane Doe')
+   *   number().required().example(25000)
+   */
+  example(value) {
+    this._example = value;
+    return this;
+  }
+
+  /**
+   * Set a human-readable description shown in the docs panel.
+   * Ignored at runtime.
+   *
+   *   string().nullable().describe('Leave blank to use the default.')
+   */
+  description(text) {
+    this._describe = text;
     return this;
   }
 
@@ -157,8 +183,8 @@ class BaseValidator {
           value,
         };
       }
-      // Optional and empty — skip all other rules
-      return { error: null, value };
+      // Optional and empty — skip all other rules, return default or undefined
+      return { error: null, value: this._defaultValue !== undefined ? this._defaultValue : value };
     }
 
     // ── Type check ──────────────────────────────────────────────────────────
@@ -167,14 +193,28 @@ class BaseValidator {
       return { error: this._typeError || typeErr, value };
     }
 
+    // ── Coerce before rules (so rules run on coerced value) ─────────────────
+    if (this._coerce) {
+      value = this._coerce(value);
+    }
+
     // ── Field-specific rules ─────────────────────────────────────────────────
-    for (const { check, message } of this._rules) {
+    for (const ruleEntry of this._rules) {
+      // .confirmed() — cross-field check
+      if (ruleEntry._isConfirmed) {
+        const confirmVal = allData[key + '_confirmation'];
+        if (value !== confirmVal) {
+          return { error: ruleEntry.message || `${label} confirmation does not match`, value };
+        }
+        continue;
+      }
+      const { check, message } = ruleEntry;
       if (!check(value, allData)) {
         return { error: message, value };
       }
     }
 
-    // ── Custom functions ─────────────────────────────────────────────────────
+    // ── Custom async functions ───────────────────────────────────────────────
     for (const fn of this._customFns) {
       const result = await fn(value, allData);
       if (result) return { error: result, value };

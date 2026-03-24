@@ -25,10 +25,22 @@ class SecurityBootstrap {
     if (config.csrf !== false) {
       const csrfConfig  = config.csrf || {};
       const adminPrefix = config.adminPrefix || '/admin';
+      const docsPrefix  = config.docsPrefix  || '/docs';
       const excluded    = [...(csrfConfig.exclude || [])];
+
+      // Auto-exclude the admin panel — it manages its own CSRF via AdminAuth
       if (!excluded.some(p => p === adminPrefix || p.startsWith(adminPrefix + '/'))) {
         excluded.push(adminPrefix + '/');
       }
+
+      // Auto-exclude the docs internal API — /_api/try is a dev-time proxy,
+      // not a state-changing endpoint on user data. It is already protected by
+      // the docs.enabled flag (off in production by default).
+      const docsApiPrefix = docsPrefix + '/_api/';
+      if (!excluded.some(p => p === docsApiPrefix || docsApiPrefix.startsWith(p))) {
+        excluded.push(docsApiPrefix);
+      }
+
       app.use(CsrfMiddleware.from({ ...csrfConfig, exclude: excluded }).middleware());
     }
 
@@ -39,7 +51,7 @@ class SecurityBootstrap {
       console.log('  ✓ Security headers:  ', headerConfig === false ? 'DISABLED' : 'enabled');
       console.log('  ✓ Cookie defaults:   ', JSON.stringify(MillasResponse.getCookieDefaults()));
       console.log('  ✓ Global rate limit: ', globalRateLimit ? `${config.rateLimit?.global?.max || 100} req/window` : 'disabled');
-      console.log('  ✓ CSRF:              ', config.csrf === false ? 'DISABLED' : 'enabled');
+      console.log('  ✓ CSRF:              ', config.csrf === false ? 'DISABLED' : `enabled (excluding: ${adminPrefix}/, ${docsPrefix}/_api/)`);
     }
   }
 

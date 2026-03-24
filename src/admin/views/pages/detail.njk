@@ -60,7 +60,7 @@
         {% endif %}
         {% if resource.canDelete %}
         <button class="btn btn-danger btn-sm"
-          onclick="confirmDelete('{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/delete', '{{ resource.singular }} #{{ record.id }}')">
+          data-confirm-delete="{{ adminPrefix }}/{{ resource.slug }}/{{ record.id }}/delete" data-confirm-label="{{ resource.singular }} #{{ record.id }}">
           <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
           Delete
         </button>
@@ -77,7 +77,7 @@
     <button
       class="tab-btn {% if loop.first %}active{% endif %}"
       data-tab="{{ loop.index0 }}"
-      onclick="switchTab({{ loop.index0 }})">
+      data-tab-index="{{ loop.index0 }}">
       {{ tab.label or 'General' }}
     </button>
     {% endfor %}
@@ -201,7 +201,7 @@
         {% endif %}
       </span>
       {% if inline.canCreate %}
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('inline-form-{{ inlineIndex }}').style.display='block';this.style.display='none'">
+      <button class="btn btn-ghost btn-sm" data-inline-show="inline-form-{{ inlineIndex }}">
         <span class="icon icon-13"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></span>
         Add
       </button>
@@ -228,7 +228,7 @@
           {% endfor %}
           <div style="display:flex;gap:6px">
             <button type="submit" class="btn btn-primary btn-sm">Save</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('inline-form-{{ inlineIndex }}').style.display='none';this.closest('.card').querySelector('.btn-ghost').style.display=''">Cancel</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-inline-hide="inline-form-{{ inlineIndex }}">Cancel</button>
           </div>
         </div>
       </form>
@@ -265,7 +265,7 @@
               <form method="POST" action="{{ inlineBase }}/{{ row.id }}/delete" style="display:inline">
                 <input type="hidden" name="_csrf" value="{{ csrfToken }}">
                 <button type="submit" class="btn btn-danger btn-xs"
-                  onclick="return confirm('Delete this record?')">
+                  data-confirm-inline="Delete this record?">
                   <span class="icon icon-12"><svg viewBox="0 0 24 24"><use href="#ic-trash"/></svg></span>
                 </button>
               </form>
@@ -348,10 +348,11 @@
   }
 </style>
 
+{% block scripts %}
 <script>
-  function switchTab(idx) {
-    document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
-    document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === idx));
-  }
+  window.MILLAS_ADMIN_PREFIX  = '{{ adminPrefix }}';
+  window.MILLAS_RESOURCE_SLUG = '{{ resource.slug }}';
 </script>
+<script src="{{ adminPrefix }}/static/change_form.js?v=1"></script>
+{% endblock %}
 {% endblock %}

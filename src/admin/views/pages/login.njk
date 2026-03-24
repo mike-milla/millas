@@ -4,22 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign In — {{ adminTitle }}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:           #f0f2f5;
+      --bg:           #f6f7f8;
       --surface:      #ffffff;
       --border:       #e3e6ec;
       --border-soft:  #edf0f5;
-      --primary:      #2563eb;
-      --primary-h:    #1d4ed8;
-      --primary-soft: #eff4ff;
-      --primary-dim:  #dbeafe;
-      --text:         #111827;
-      --text-soft:    #374151;
+      --primary:      #f6821f;
+      --primary-h:    #e06d1a;
+      --primary-soft: #fff4e6;
+      --primary-dim:  #ffe4c4;
+      --text:         #172b4d;
+       --text-soft:    #2c3e50;
       --text-muted:   #6b7280;
       --text-xmuted:  #9ca3af;
       --danger:       #dc2626;
@@ -51,7 +48,7 @@
     .login-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 6px;
       box-shadow: var(--shadow);
       width: 100%;
       max-width: 400px;
@@ -203,6 +200,15 @@
         radial-gradient(ellipse 60% 40% at 80% 90%, rgba(99,102,241,.05) 0%, transparent 60%);
       pointer-events: none;
     }
+    input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 100px white inset !important;
+  -webkit-text-fill-color: #000 !important;
+  caret-color: #000;
+  transition: background-color 5000s ease-in-out 0s;
+}
   </style>
 </head>
 <body>
@@ -210,13 +216,6 @@
   <div class="login-card">
 
     <div class="login-header">
-      <div class="login-logo">
-        <svg viewBox="0 0 24 24">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>
-      </div>
       <div class="login-title">{{ adminTitle }}</div>
       <div class="login-subtitle">Sign in to your admin panel</div>
     </div>
@@ -270,7 +269,7 @@
               autocomplete="current-password"
               required
               style="padding-right: 40px">
-            <button type="button" class="pw-toggle" onclick="togglePw()" aria-label="Toggle password visibility">
+            <button type="button" class="pw-toggle" aria-label="Toggle password visibility">
               <svg id="pw-icon" viewBox="0 0 24 24">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
@@ -304,51 +303,7 @@
 
   </div>
 
-  <script>
-    function togglePw() {
-      const input = document.getElementById('password');
-      const icon  = document.getElementById('pw-icon');
-      const isHidden = input.type === 'password';
-      input.type = isHidden ? 'text' : 'password';
-      icon.innerHTML = isHidden
-        ? `<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>`
-        : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
-    }
-
-    // Submit loading state + basic client validation
-    document.getElementById('login-form').addEventListener('submit', function(e) {
-      const email    = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value;
-
-      if (!email || !password) {
-        e.preventDefault();
-        const existing = document.getElementById('login-error');
-        const msg = !email ? 'Email is required.' : 'Password is required.';
-        if (existing) {
-          existing.querySelector('svg + *')
-            ? (existing.lastChild.textContent = msg)
-            : (existing.innerHTML += ` ${msg}`);
-        } else {
-          const el = document.createElement('div');
-          el.className = 'alert alert-error';
-          el.id = 'login-error';
-          el.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> ${msg}`;
-          this.insertBefore(el, this.firstChild);
-        }
-        return;
-      }
-
-      const btn  = document.getElementById('login-btn');
-      const icon = document.getElementById('login-icon');
-      btn.disabled = true;
-      icon.innerHTML = `<circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32" class="spin"/>`;
-      btn.lastChild.textContent = ' Signing in…';
-    });
-
-    // Auto-focus password if email is pre-filled
-    const emailVal = document.getElementById('email').value;
-    if (emailVal) document.getElementById('password').focus();
-  </script>
+  <script src="{{ adminPrefix }}/static/login.js?v=1"></script>
 
 </body>
 </html>

@@ -1,7 +1,7 @@
 'use strict';
 
 const { createFacade } = require('./Facade');
-const { AuthUser, Hasher, JwtDriver, AuthMiddleware, RoleMiddleware, AuthController, AuthServiceProvider } = require('../core');
+// const { AuthUser, Hasher, JwtDriver, AuthMiddleware, RoleMiddleware, AuthController, AuthServiceProvider } = require('../core');
 
 /**
  * Auth facade.
@@ -9,9 +9,12 @@ const { AuthUser, Hasher, JwtDriver, AuthMiddleware, RoleMiddleware, AuthControl
  * @class
  * @property {function(object): Promise<object>}                             register
  * @property {function(string, string): Promise<{user, token, refreshToken}>} login
+ * @property {function(string, string): Promise<object|null>}                attempt
  * @property {function(string): object}                                      verify
  * @property {function(object): Promise<object|null>}                        user
  * @property {function(object): Promise<object>}                             userOrFail
+ * @property {function(object, string): Promise<void>}                       revokeToken
+ * @property {function(string): boolean}                                     isRevoked
  * @property {function(string, string): Promise<boolean>}                    checkPassword
  * @property {function(string): Promise<string>}                             hashPassword
  * @property {function(object, object=): string}                             issueToken
@@ -26,4 +29,4 @@ const { AuthUser, Hasher, JwtDriver, AuthMiddleware, RoleMiddleware, AuthControl
  */
 class Auth extends createFacade('auth') {}
 
-module.exports = { Auth, AuthUser, Hasher, JwtDriver, AuthMiddleware, RoleMiddleware, AuthController, AuthServiceProvider };
+module.exports = Auth

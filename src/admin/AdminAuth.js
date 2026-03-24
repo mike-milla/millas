@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const Hasher = require('../auth/Hasher');
 
 /**
  * AdminAuth
@@ -166,7 +167,6 @@ class AdminAuth {
     const user       = await this._loadUserByEmail(normalised);
 
     // Always check password first — avoids leaking account existence
-    const Hasher = require('../auth/Hasher');
     const validPassword = user ? await Hasher.check(password, user.password) : false;
 
     if (!user || !validPassword) {

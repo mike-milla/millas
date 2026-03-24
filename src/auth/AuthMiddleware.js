@@ -31,6 +31,10 @@ class AuthMiddleware extends Middleware {
       throw new HttpError(401, 'Token is empty');
     }
 
+    if (Auth.isRevoked(token)) {
+      throw new HttpError(401, 'Token has been revoked');
+    }
+
     const payload = Auth.verify(token);
 
     let user;

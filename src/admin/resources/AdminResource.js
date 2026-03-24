@@ -52,8 +52,20 @@ class AdminResource {
   /** Singular label */
   static labelSingular = null;
 
-  /** SVG icon id (without ic- prefix) */
+  /** Bootstrap Icons name (e.g. 'house', 'people', 'credit-card') */
   static icon = 'table';
+
+  /**
+   * Sidebar group label. Resources with the same group are rendered under
+   * the same collapsible section in the admin sidebar.
+   *
+   *   static group = 'Property & Units';
+   *   static group = 'Payments';
+   *   static group = 'KYC';
+   *
+   * Resources with no group are placed under a default 'Resources' section.
+   */
+  static group = null;
 
   /** Records per page default */
   static perPage = 20;
@@ -430,6 +442,15 @@ class AdminResource {
         case 'id':
           // Never write id — already deleted above
           delete clean[key];
+          break;
+        case 'password':
+          // Blank password on an edit form means "keep the current hash" —
+          // remove the key entirely so it is never written to the DB and
+          // never passed to before_save. Non-blank values pass through as-is;
+          // the developer hashes them in before_save using Hash.make().
+          if (raw === '' || raw === null || raw === undefined) {
+            delete clean[key];
+          }
           break;
         default:
           // string-like fields: leave as-is

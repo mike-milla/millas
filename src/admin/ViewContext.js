@@ -60,7 +60,7 @@ class ViewContext {
   static base({ admin, user, csrfToken, flash = {}, activePage = null, activeResource = null }) {
     return {
       csrfToken,
-      adminPrefix:    admin._config.prefix,
+      adminPrefix:    admin._config.prefix.replace(/\/+$/, ''),
       adminTitle:     admin._config.title,
       adminUser:      user || null,
       authEnabled:    admin._auth?.enabled ?? false,

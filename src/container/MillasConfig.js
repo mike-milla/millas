@@ -52,6 +52,9 @@ class MillasConfig {
             // Admin panel — null means disabled, {} or options object means enabled
             admin: null,
 
+            // Docs panel — null means disabled, {} or options object means enabled
+            docs: null,
+
             // Raw adapter-level middleware (e.g. helmet, compression)
             adapterMiddleware: [],
 
@@ -127,6 +130,23 @@ class MillasConfig {
      */
     withAdmin(options = {}) {
         this._config.admin = options;
+        return this;
+    }
+
+    /**
+     * Enable the API documentation panel.
+     *
+     * DocsServiceProvider is registered automatically — no need to add it
+     * to .providers([]). The panel mounts at /docs by default.
+     *
+     *   .withDocs()
+     *   .withDocs({ prefix: '/api-docs', title: 'My API', auth: true })
+     *
+     * To register ApiResources, call Docs.register() / Docs.registerMany()
+     * inside AppServiceProvider.boot() or a dedicated bootstrap/docs.js.
+     */
+    withDocs(options = {}) {
+        this._config.docs = options;
         return this;
     }
 

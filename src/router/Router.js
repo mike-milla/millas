@@ -67,7 +67,17 @@ class Router {
 
   _bindRoute(route) {
     const middlewareHandlers = this._resolveMiddleware(route.middleware || []);
-    const terminalHandler    = this._resolveTerminalHandler(
+
+    // ── Shape validation middleware ────────────────────────────────────────
+    // If the route has a .shape() / .fromShape() declaration, inject a
+    // validation middleware that runs BEFORE the handler.
+    // On failure → 422 immediately, handler never runs.
+    // On success → ctx.body is replaced with coerced, validated output.
+    const shapeMiddlewares = route.shape
+      ? this._buildShapeMiddleware(route.shape)
+      : [];
+
+    const terminalHandler = this._resolveTerminalHandler(
       route.handler,
       route.method,
       route.verb,
@@ -77,8 +87,68 @@ class Router {
 
     this._adapter.mountRoute(route.verb, route.path, [
       ...middlewareHandlers,
+      ...shapeMiddlewares,
       terminalHandler,
     ]);
+  }
+
+  /**
+   * Build Express middleware functions from a shape definition.
+   * Returns an array of 0, 1, or 2 middleware functions
+   * (one for body/in, one for query) depending on what the shape declares.
+   *
+   * @param {import('../http/Shape').ShapeDefinition} shape
+   * @returns {Function[]}
+   */
+  _buildShapeMiddleware(shape) {
+    const { Validator } = require('../validation/Validator');
+    const middlewares   = [];
+
+    // ── Body / in validation ───────────────────────────────────────────────
+    if (shape.in && Object.keys(shape.in).length) {
+      middlewares.push(async (req, res, next) => {
+        try {
+          const rawBody = req.body || {};
+          const clean   = await Validator.validate(rawBody, shape.in);
+          // Replace req.body with the coerced, validated subset so the
+          // handler's { body } destructure gets clean data automatically.
+          req.body = clean;
+          next();
+        } catch (err) {
+          // ValidationError → 422, any other error → pass to error handler
+          if (err.code === 'EVALIDATION' || err.name === 'ValidationError') {
+            return res.status(422).json({
+              status:  422,
+              message: 'Validation failed',
+              errors:  err.errors || {},
+            });
+          }
+          next(err);
+        }
+      });
+    }
+
+    // ── Query validation ───────────────────────────────────────────────────
+    if (shape.query && Object.keys(shape.query).length) {
+      middlewares.push(async (req, res, next) => {
+        try {
+          const clean = await Validator.validate(req.query || {}, shape.query);
+          req.query   = clean;
+          next();
+        } catch (err) {
+          if (err.code === 'EVALIDATION' || err.name === 'ValidationError') {
+            return res.status(422).json({
+              status:  422,
+              message: 'Validation failed',
+              errors:  err.errors || {},
+            });
+          }
+          next(err);
+        }
+      });
+    }
+
+    return middlewares;
   }
 
   _resolveMiddleware(list) {

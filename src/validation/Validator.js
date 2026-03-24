@@ -3,60 +3,47 @@
 /**
  * Validator
  *
- * Input validation for Millas. Supports both inline usage (req.validate())
- * and route-level declaration (rules declared at route definition time,
- * making validation impossible to forget).
+ * Core validation engine for Millas.
+ * Works with fluent typed validators from millas/core/validation.
  *
- * ── Rule syntax ───────────────────────────────────────────────────────────────
+ * ── Usage (via body.validate in a handler) ────────────────────────────────────
  *
- *   Rules are pipe-separated strings or arrays of strings:
+ *   const { string, email, number, boolean, array, date, object, file } =
+ *     require('millas/core/validation');
  *
- *   'required|string|min:2|max:100'
- *   'required|email'
- *   'optional|number|min:0|max:150'
- *   'required|boolean'
- *   'required|array'
- *   'required|in:admin,user,guest'
- *   'required|regex:/^[a-z]+$/i'
- *   'required|uuid'
- *   'required|url'
- *   'required|date'
- *   'optional|string'              — field may be absent; validated if present
- *   'nullable|string'              — field may be null or absent
- *
- * ── Inline usage ──────────────────────────────────────────────────────────────
- *
- *   Route.post('/register', async (req) => {
- *     const data = await req.validate({
- *       name:     'required|string|min:2|max:100',
- *       email:    'required|email',
- *       password: 'required|string|min:8',
- *       age:      'optional|number|min:13',
+ *   Route.post('/register', async ({ body }) => {
+ *     const data = await body.validate({
+ *       name:     string().required().min(2).max(100),
+ *       email:    email().required(),
+ *       password: string().required().min(8).confirmed(),
+ *       age:      number().optional().min(13),
+ *       role:     string().oneOf(['admin', 'user']).default('user'),
  *     });
- *     // data is the validated + type-coerced subset of input
+ *     return jsonify(await User.create(data), { status: 201 });
  *   });
  *
- * ── Route-level usage (validation before the handler runs) ────────────────────
+ * ── Usage (via .shape() on a route — preferred) ───────────────────────────────
  *
- *   Route.post('/register', {
- *     validate: {
- *       name:     'required|string|min:2|max:100',
- *       email:    'required|email',
- *       password: 'required|string|min:8',
- *     },
- *   }, async (req) => {
- *     // req.validated contains the safe, validated subset
- *     const { name, email, password } = req.validated;
- *   });
+ *   Route.post('/register', AuthController, 'register')
+ *     .shape({
+ *       label: 'Register',
+ *       group: 'Auth',
+ *       in: {
+ *         name:     string().required().min(2).max(100).example('Jane Doe'),
+ *         email:    email().required().example('jane@example.com'),
+ *         password: string().required().min(8).confirmed(),
+ *       },
+ *       out: { 201: { token: 'eyJ...' } },
+ *     });
  *
  * ── Error format ──────────────────────────────────────────────────────────────
  *
- *   Throws a 422 ValidationError on failure. Error shape:
+ *   Throws a 422 ValidationError on failure:
  *   {
  *     status:  422,
  *     message: 'Validation failed',
  *     errors: {
- *       email:    ['Email is required', 'Must be a valid email address'],
+ *       email:    ['Email is required'],
  *       password: ['Must be at least 8 characters'],
  *     }
  *   }
@@ -285,20 +272,39 @@ class Validator {
    * @returns {object}       — validated + coerced subset of data
    * @throws {ValidationError}
    */
-  static validate(data, rules) {
-    const errors  = {};
-    const output  = {};
+  static async validate(data, rules) {
+    const errors = {};
+    const output = {};
 
-    for (const [field, ruleString] of Object.entries(rules)) {
-      const ruleParts = (Array.isArray(ruleString) ? ruleString : ruleString.split('|'))
+    const { BaseValidator } = require('./BaseValidator');
+
+    for (const [field, rule] of Object.entries(rules)) {
+      const value = data[field];
+
+      // ── Typed validator instance (string(), email(), number(), etc.) ────────
+      // Delegate entirely to BaseValidator.run() which handles:
+      //   defaults, required, nullable, type check, rules, custom async fns, coercion
+      if (rule instanceof BaseValidator) {
+        // Set the field label so error messages use the field name
+        if (!rule._label) rule._label = _humanise(field);
+
+        const { error, value: cleaned } = await rule.run(value, field, data);
+        if (error) {
+          errors[field] = [error];
+        } else if (cleaned !== undefined) {
+          output[field] = cleaned;
+        }
+        continue;
+      }
+
+      // ── Pipe-string rule (legacy / shorthand) ──────────────────────────────
+      const ruleParts = (Array.isArray(rule) ? rule : rule.split('|'))
         .map(r => r.trim())
         .filter(Boolean);
 
       const ruleNames = ruleParts.map(r => r.split(':')[0].trim());
       const isOptional = ruleNames.includes('optional');
       const isNullable = ruleNames.includes('nullable');
-
-      const value = data[field];
 
       // Skip optional fields that are absent
       if (isOptional && (value === undefined || value === null || value === '')) {
@@ -318,7 +324,6 @@ class Validator {
         const handler = RULES[name];
 
         if (!handler) {
-          // Unknown rule — fail loudly in development, skip silently in production
           if (process.env.NODE_ENV !== 'production') {
             throw new Error(`[Millas Validator] Unknown rule: "${name}". Check your validation rules for field "${field}".`);
           }
@@ -350,9 +355,9 @@ class Validator {
    *   const { data, errors } = Validator.check(input, rules);
    *   if (errors) { ... }
    */
-  static check(data, rules) {
+  static async check(data, rules) {
     try {
-      const result = Validator.validate(data, rules);
+      const result = await Validator.validate(data, rules);
       return { data: result, errors: null };
     } catch (err) {
       if (err instanceof ValidationError) {
@@ -370,9 +375,6 @@ class Validator {
    *       return `${field} must be a valid phone number`;
    *     }
    *   });
-   *
-   *   // Then use it:
-   *   await req.validate({ phone: 'required|phone' });
    */
   static extend(name, handler) {
     if (RULES[name]) {
@@ -393,15 +395,14 @@ class Validator {
   }
 
   /**
-   * Returns the Express middleware that runs route-level validation.
-   * Attaches req.validated with the clean, coerced data on success.
+   * Returns an Express middleware function that validates the request.
+   * Used internally by Router when a route has .shape({ in: {...} }).
+   * Prefer using .shape() on routes rather than calling this directly.
    *
-   *   app.post('/register', Validator.middleware({ email: 'required|email' }), handler);
-   *
-   * @param {object} rules
+   * @param {object} rules  — { field: BaseValidator | pipe-string }
    */
   static middleware(rules) {
-    return (req, res, next) => {
+    return async (req, res, next) => {
       const data = {
         ...req.params,
         ...req.query,
@@ -409,7 +410,7 @@ class Validator {
       };
 
       try {
-        req.validated = Validator.validate(data, rules);
+        req.validated = await Validator.validate(data, rules);
         next();
       } catch (err) {
         next(err); // passes ValidationError to Express error handler
@@ -418,4 +419,9 @@ class Validator {
   }
 }
 
-module.exports = { Validator, ValidationError };
+module.exports = {
+  Validator,
+  ValidationError,
+  // Re-export typed builders from types.js for convenience
+  ...require('./types'),
+};

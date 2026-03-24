@@ -8,23 +8,25 @@ const { jsonify, redirect, view, text, empty } = require('../http/helpers');
  *
  * Base class for all Millas controllers.
  *
- * Controller methods receive a MillasRequest and return a MillasResponse
- * (or a plain value that the kernel auto-wraps). Express is never exposed.
+ * Controller methods receive a RequestContext destructured as named keys.
+ * Express req/res are never exposed. Return a response helper or plain value.
  *
  * Usage:
  *   class UserController extends Controller {
- *     async index(req) {
- *       const users = await User.all();
+ *     async index({ query }) {
+ *       const users = await User.paginate(query.page, query.per_page);
  *       return this.ok(users);
  *     }
  *
- *     async store(req) {
- *       const data = await req.validate({
- *         name:  'required|string',
- *         email: 'required|email',
- *       });
- *       const user = await User.create(data);
+ *     async store({ body }) {
+ *       // body is already validated when .shape() is used on the route
+ *       const user = await User.create(body);
  *       return this.created(user);
+ *     }
+ *
+ *     async show({ params }) {
+ *       const user = await User.findOrFail(params.id);
+ *       return this.ok(user);
  *     }
  *   }
  */

@@ -262,6 +262,68 @@ module.exports = {
   return write(filePath, content);
 }
 
+
+async function makeShape(name) {
+  const baseName  = name.endsWith('Shape') ? name : (name + 'Shape');
+  const className = pascalCase(baseName);
+  const filePath  = resolveAppPath('app/shapes', className + '.js');
+  const groupBase = className.replace(/Shape$/, '');
+  const group     = groupBase + 's';
+
+  const lines = [
+    "'use strict';",
+    '',
+    "const { shape }                               = require('millas/core/http');",
+    "const { string, number, boolean, array, email, date } = require('millas/core/validation');",
+    '',
+    '/**',
+    ' * ' + className,
+    ' *',
+    ' * Route input/output contracts for ' + groupBase + ' endpoints.',
+    ' *',
+    ' * Usage:',
+    ' *   Route.post(\'/path\', ' + groupBase + 'Controller, \'store\').fromShape(Create' + groupBase + 'Shape);',
+    ' *   Route.put(\'/path/:id\', ' + groupBase + 'Controller, \'update\').fromShape(Update' + groupBase + 'Shape);',
+    ' *',
+    ' * The "in" schema validates the request body before the handler runs.',
+    ' * Failures return 422 automatically. Use { body } in your handler — it is clean.',
+    ' */',
+    '',
+    'const Create' + groupBase + 'Shape = shape({',
+    "  label:       'Create " + groupBase.toLowerCase() + "',",
+    "  group:       '" + group + "',",
+    '  description: null,',
+    '  in: {',
+    '    // name:   string().required().max(200).example(\'My ' + groupBase + '\'),',
+    '    // email:  email().required().example(\'user@example.com\'),',
+    '    // count:  number().required().min(1).example(1),',
+    '    // active: boolean().optional().example(true),',
+    "    // tags:   array().of(string()).optional().example(['tag1', 'tag2']),",
+    "    // type:   string().required().oneOf(['option_a', 'option_b']),",
+    '  },',
+    '  out: {',
+    '    201: { id: 1 },',
+    "    422: { message: 'Validation failed', errors: {} },",
+    '  },',
+    '});',
+    '',
+    'const Update' + groupBase + 'Shape = shape({',
+    "  label:       'Update " + groupBase.toLowerCase() + "',",
+    "  group:       '" + group + "',",
+    '  in: {',
+    '    // name: string().optional().max(200),',
+    '  },',
+    '  out: {',
+    '    200: { id: 1 },',
+    "    422: { message: 'Validation failed', errors: {} },",
+    '  },',
+    '});',
+    '',
+    'module.exports = { Create' + groupBase + 'Shape, Update' + groupBase + 'Shape };',
+  ];
+
+  return write(filePath, lines.join('\n'));
+}
 module.exports = {
   makeController,
   makeModel,
@@ -269,4 +331,5 @@ module.exports = {
   makeService,
   makeJob,
   makeMigration,
+  makeShape,
 };

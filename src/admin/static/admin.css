@@ -97,6 +97,13 @@
       overflow-y: auto;
       overflow-x: hidden;
     }
+    .nav-section-container{
+         display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+        flex-grow: 1;
+    }
 
     .sidebar-brand {
       padding: 18px 16px 16px;

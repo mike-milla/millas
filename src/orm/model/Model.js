@@ -198,6 +198,18 @@ class Model {
   /** Define relations: static relations = { author: new BelongsTo(...) } */
   static relations = {};
 
+  /**
+   * Fields always excluded from toJSON() — the universal safety net.
+   * Applied everywhere a model is serialized: API responses, logs, admin.
+   * Individual models extend this list for their own sensitive fields.
+   *
+   *   // In your User model:
+   *   static hidden = ['password', 'remember_token', 'two_factor_secret'];
+   *
+   * Default covers the two fields that should never leak anywhere.
+   */
+  static hidden = ['password', 'remember_token'];
+
   // ─── Lifecycle hooks (override in subclass) ───────────────────────────────
 
   static async beforeCreate(data)    { return data; }
@@ -724,9 +736,10 @@ class Model {
   get isTrashed()   { return !!this.deleted_at; }
 
   toJSON() {
+    const hidden = new Set(this.constructor.hidden || []);
     const obj = {};
     for (const key of Object.keys(this)) {
-      if (!key.startsWith('_') && typeof this[key] !== 'function') {
+      if (!key.startsWith('_') && typeof this[key] !== 'function' && !hidden.has(key)) {
         obj[key] = this[key];
       }
     }

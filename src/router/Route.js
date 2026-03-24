@@ -1,7 +1,8 @@
 'use strict';
 
-const RouteGroup = require('./RouteGroup');
+const RouteGroup  = require('./RouteGroup');
 const RouteRegistry = require('./RouteRegistry');
+const RouteEntry  = require('./RouteEntry');
 
 /**
  * Route
@@ -170,15 +171,19 @@ class Route {
 
     const entry = {
       verb,
-      path: fullPath,
+      path:       fullPath,
       handler,
       method,      // string method name OR raw function
       middleware,
       name,
+      shape:       null,   // populated by RouteEntry.shape() / .fromShape()
     };
 
     this._registry.register(entry);
-    return this;
+    // Return a RouteEntry so .shape() / .fromShape() can be chained.
+    // The RouteEntry holds a reference back to this Route so group-level
+    // calls (which don't use the returned value) still work normally.
+    return new RouteEntry(entry, this);
   }
 
   _mergeGroupStack() {

@@ -5,13 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrfToken }}">
   <title>{% block title %}{{ pageTitle }}{% endblock %} — {{ adminTitle }}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ adminPrefix }}/static/admin.css?v=21">
+  <link rel="stylesheet" href="{{ adminPrefix }}/static/admin.css?v=23">
   <link rel="stylesheet" href="{{ adminPrefix }}/static/json-editor.css?v=4">
   <link rel="stylesheet" href="{{ adminPrefix }}/static/date-picker.css?v=3">
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
+  <script src="{{ adminPrefix }}/static/vendor/jquery.min.js"></script>
+  <link rel="stylesheet" href="{{ adminPrefix }}/static/vendor/bi/bootstrap-icons.min.css">
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -34,7 +32,7 @@
         <div class="brand-sub">Admin Panel</div>
       </div>
     </div>
-
+<div class="nav-section-container">
     <div class="nav-section">
       <div class="nav-label">Overview</div>
       <a href="{{ adminPrefix }}/" class="nav-item {% if activePage == 'dashboard' %}active{% endif %}">
@@ -45,21 +43,9 @@
       </a>
     </div>
 
-    {% if resources | length %}
-    <div class="nav-section">
-      <div class="nav-label">Resources</div>
-      {% for resource in resources %}
-      {% if resource.category != 'auth' %}
-      <a href="{{ adminPrefix }}/{{ resource.slug }}" class="nav-item {% if activeResource == resource.slug %}active{% endif %}">
-        <span class="nav-icon icon icon-16">
-          <svg viewBox="0 0 24 24"><use href="#ic-{{ resource.icon or 'table' }}"/></svg>
-        </span>
-        {{ resource.label }}
-      </a>
-      {% endif %}
-      {% endfor %}
-    </div>
+    {% if navGroups | length %}
 
+    {# ── Auth resources first ── #}
     {% set hasAuth = false %}
     {% for resource in resources %}{% if resource.category == 'auth' %}{% set hasAuth = true %}{% endif %}{% endfor %}
     {% if hasAuth %}
@@ -69,7 +55,7 @@
       {% if resource.category == 'auth' %}
       <a href="{{ adminPrefix }}/{{ resource.slug }}" class="nav-item {% if activeResource == resource.slug %}active{% endif %}">
         <span class="nav-icon icon icon-16">
-          <svg viewBox="0 0 24 24"><use href="#ic-{{ resource.icon or 'user' }}"/></svg>
+          <i class="bi bi-{{ resource.icon or 'person' }}"></i>
         </span>
         {{ resource.label }}
       </a>
@@ -77,7 +63,24 @@
       {% endfor %}
     </div>
     {% endif %}
+
+    {# ── App resource groups ── #}
+    {% for group in navGroups %}
+    <div class="nav-section">
+      <div class="nav-label">{{ group.label or 'Resources' }}</div>
+      {% for resource in group.resources %}
+      <a href="{{ adminPrefix }}/{{ resource.slug }}" class="nav-item {% if activeResource == resource.slug %}active{% endif %}">
+        <span class="nav-icon icon icon-16">
+          <i class="bi bi-{{ resource.icon or 'table2' }}"></i>
+        </span>
+        {{ resource.label }}
+      </a>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
     {% endif %}
+    </div>
 
     <div class="sidebar-footer">
       {% if authEnabled and adminUser %}
@@ -161,102 +164,16 @@
 
   <div id="toast-root"></div>
 
-  <script src="{{ adminPrefix }}/static/ui.js?v=13"></script>
+  <script src="{{ adminPrefix }}/static/ui.js?v=14"></script>
   <script>
-    // ── Global helpers ─────────────────────────────────────────────────────────
-    function toast(msg, type)  { UI.Toast.show(msg, type || 'success'); }
-    function openModal(id)     { $('#' + id).addClass('open'); }
-    function closeModal(id)    { id ? $('#' + id).removeClass('open') : $('.modal-overlay').removeClass('open'); }
-
-    // ── Delete confirmation ─────────────────────────────────────────────────────
-    function confirmDelete(url, label) {
-      UI.Confirm.show({
-        title:   'Delete ' + label,
-        message: 'Are you sure you want to delete <strong>' + label + '</strong>? This cannot be undone.',
-        confirm: 'Delete',
-        danger:  true,
-      }).then(function(ok) { if (ok) submitDelete(url); });
-    }
-    function submitDelete(url) {
-      var csrf = $('meta[name="csrf-token"]').attr('content') || '';
-      $('<form method="POST">')
-        .attr('action', url)
-        .append('<input name="_method" value="DELETE">')
-        .append('<input name="_csrf" value="' + csrf + '">')
-        .appendTo('body')
-        .submit();
-    }
-
-    // ── M2M dual-list helpers ───────────────────────────────────────────────────
-    function m2mMove(fieldName, fromId, toId) {
-      $('#m2m-' + fromId + '-' + fieldName + ' option:selected')
-        .appendTo('#m2m-' + toId + '-' + fieldName);
-    }
-
-    $(function() {
-      // ── M2M: select all chosen before submit ──────────────────────────────────
-      $('form').on('submit', function() {
-        $('[id^="m2m-chosen-"] option').prop('selected', true);
-      });
-
-      // ── Flash auto-dismiss ────────────────────────────────────────────────────
-      var $flash = $('#flash-alert');
-      if ($flash.length) {
-        setTimeout(function() {
-          $flash.fadeTo(400, 0, function() { $flash.remove(); });
-        }, 5000);
-      }
-
-      // ── Search placeholder hint ───────────────────────────────────────────────
-      $('#global-search-input')
-        .on('focus', function() { $(this).attr('placeholder', 'Search everything…'); })
-        .on('blur',  function() { $(this).attr('placeholder', 'Search everything… (/)'); });
-
-      // ── Keyboard shortcuts ────────────────────────────────────────────────────
-      var prefix    = '{{ adminPrefix }}';
-      var resources = [
-        {% for r in resources %}
-        { slug: '{{ r.slug }}', index: {{ r.index | default('null') }} }{% if not loop.last %},{% endif %}
-        {% endfor %}
-      ];
-      var gPressed = false, gTimer;
-
-      $(document).on('keydown', function(e) {
-        var tag = document.activeElement && document.activeElement.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
-          if (e.key === 'Escape') $(document.activeElement).blur();
-          return;
-        }
-        if (e.key === '/') {
-          e.preventDefault();
-          $('#global-search-input').focus();
-          return;
-        }
-        if (e.key === 'n' || e.key === 'N') {
-          var $btn = $('a[href*="/create"].btn-primary').first();
-          if ($btn.length) { e.preventDefault(); location.href = $btn.attr('href'); }
-          return;
-        }
-        if (e.key === 'Escape') { $('.modal-overlay').removeClass('open'); return; }
-        if (e.key === 'g' || e.key === 'G') {
-          if (gPressed) return;
-          gPressed = true;
-          clearTimeout(gTimer);
-          gTimer = setTimeout(function() { gPressed = false; }, 800);
-          return;
-        }
-        if (gPressed && (e.key === 'd' || e.key === 'D')) {
-          gPressed = false; location.href = prefix + '/'; return;
-        }
-        if (gPressed && e.key >= '1' && e.key <= '9') {
-          gPressed = false;
-          var idx = parseInt(e.key);
-          var r = $.grep(resources, function(x) { return x.index === idx; })[0];
-          if (r) location.href = prefix + '/' + r.slug;
-        }
-      });
-    });
+    window.MILLAS_ADMIN_PREFIX    = '{{ adminPrefix }}';
+    window.MILLAS_ADMIN_RESOURCES = [
+      {% for r in resources %}
+      { slug: '{{ r.slug }}', index: {{ r.index | default('null') }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
   </script>
+  <script src="{{ adminPrefix }}/static/core.js?v=1"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
