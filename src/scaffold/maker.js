@@ -324,6 +324,58 @@ async function makeShape(name) {
 
   return write(filePath, lines.join('\n'));
 }
+async function makeCommand(name) {
+  const baseName  = name.endsWith('Command') ? name : `${name}Command`;
+  const className = pascalCase(baseName);
+  const signature = name
+    .replace(/Command$/i, '')
+    .replace(/([a-z])([A-Z])/g, '$1:$2')
+    .toLowerCase();
+  const filePath = resolveAppPath('app/commands', `${className}.js`);
+
+  const content = `'use strict';
+
+const { Command } = require('millas/console');
+
+/**
+ * ${className}
+ *
+ * Run with:  millas call ${signature}
+ */
+class ${className} extends Command {
+  static signature   = '${signature}';
+  static description = 'Description of ${signature}';
+
+  // Optional: positional arguments
+  // static args = [
+  //   { name: 'target', description: 'The target to act on', default: 'all' },
+  // ];
+
+  // Optional: named options / flags
+  // static options = [
+  //   { flag: '--dry-run',    description: 'Preview without making changes' },
+  //   { flag: '--limit <n>',  description: 'Max items to process', default: '50' },
+  // ];
+
+  async handle() {
+    // const target = this.argument('target');
+    // const limit  = this.option('limit');
+    // const dry    = this.option('dryRun');
+
+    this.info('Running ${signature}...');
+
+    // Your command logic here
+
+    this.success('Done.');
+  }
+}
+
+module.exports = ${className};
+`;
+
+  return write(filePath, content);
+}
+
 module.exports = {
   makeController,
   makeModel,
@@ -332,4 +384,5 @@ module.exports = {
   makeJob,
   makeMigration,
   makeShape,
+  makeCommand,
 };

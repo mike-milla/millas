@@ -7,7 +7,9 @@
     ".": "./src/index.js",
     "./core/*": "./src/core/*.js",
     "./middleware/*": "./src/middleware/*.js",
-    "./facades/*": "./src/facades/*.js"
+    "./facades/*": "./src/facades/*.js",
+    "./console": "./src/console/index.js",
+    "./console/*": "./src/console/*.js"
   },
   "bin": {
     "millas": "./bin/millas.js"

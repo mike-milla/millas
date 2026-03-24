@@ -1,7 +1,7 @@
 'use strict';
 
 const chalk = require('chalk');
-const { makeController, makeModel, makeMiddleware, makeService, makeJob, makeMigration, makeShape } = require('../scaffold/maker');
+const { makeController, makeModel, makeMiddleware, makeService, makeJob, makeMigration, makeShape, makeCommand } = require('../scaffold/maker');
 
 module.exports = function (program) {
 
@@ -55,6 +55,13 @@ module.exports = function (program) {
     .action(async (name) => {
       await run('Shape', () => makeShape(name));
     });
+  program
+    .command('make:command <n>')
+    .description('Generate a new custom console command in app/commands/')
+    .action(async (name) => {
+      await run('Command', () => makeCommand(name));
+    });
+
 };
 
 async function run(type, fn) {

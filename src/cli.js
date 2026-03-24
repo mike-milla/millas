@@ -18,6 +18,7 @@ require('./commands/route')(program);
 require('./commands/queue')(program);
 require('./commands/createsuperuser')(program);
 require('./commands/lang')(program);
+require('./commands/call')(program);
 
 // Unknown command handler
 program.on('command:*', ([cmd]) => {
