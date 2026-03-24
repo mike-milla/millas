@@ -231,6 +231,15 @@ class AppInitializer {
         // ── 9. i18n — opt-in via config/app.js use_i18n: true ───────────────
         // Mirrors Django's USE_I18N = True in settings.py.
         // Booted last so translations are available in all request handlers.
+        // ── 9. Encryption — always on (APP_KEY drives it) ────────────────────
+        // Mirrors Laravel: the encrypter is always bound so Crypt / Encrypt
+        // facades work out of the box. If APP_KEY is absent a clear error is
+        // thrown on first use, not at boot — apps without encryption still start.
+        {
+            const p = load('../providers/EncryptionServiceProvider');
+            if (p) providers.push(p);
+        }
+
         if (this._resolveI18nEnabled(cfg)) {
             const p = load('../i18n/I18nServiceProvider');
             if (p) providers.push(p);

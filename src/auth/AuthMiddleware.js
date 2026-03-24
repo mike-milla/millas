@@ -15,8 +15,8 @@ const Auth       = require('./Auth');
  * No Express res — returns a MillasResponse or calls next().
  */
 class AuthMiddleware extends Middleware {
-  async handle({ headers, req }, next) {
-    const header = headers.authorization || headers.Authorization;
+  async handle(req, res, next) {
+    const header = req.headers?.authorization || req.headers?.Authorization;
 
     if (!header) {
       throw new HttpError(401, 'Authorization header missing');
@@ -39,19 +39,18 @@ class AuthMiddleware extends Middleware {
 
     let user;
     try {
-      user = await Auth.user(req.raw);
-    } catch {
-      throw new HttpError(401, 'Authentication service not configured');
+      user = await Auth.user(req);
+    } catch (err) {
+      throw new HttpError(401, 'Authentication failed: ' + err.message);
     }
 
     if (!user) {
       throw new HttpError(401, 'User not found or has been deleted');
     }
 
-    // Attach to the underlying request so downstream handlers see req.user
-    req.raw.user         = user;
-    req.raw.token        = token;
-    req.raw.tokenPayload = payload;
+    req.user         = user;
+    req.token        = token;
+    req.tokenPayload = payload;
 
     return next();
   }

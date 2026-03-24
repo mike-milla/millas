@@ -22,6 +22,7 @@ class AuthMiddleware extends Middleware {
   async handle(req, res, next) {
     const header = req.headers['authorization'];
 
+
     if (!header) {
       throw new HttpError(401, 'No authorization token provided');
     }
