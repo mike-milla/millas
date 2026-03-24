@@ -5,6 +5,7 @@ const chalk = require('chalk');
 const program = new Command();
 
 program
+  .enablePositionalOptions()
   .name('millas')
   .description(chalk.cyan('⚡ Millas — A modern batteries-included Node.js framework'))
   .version('0.2.12-beta-1');
@@ -18,6 +19,7 @@ require('./commands/route')(program);
 require('./commands/queue')(program);
 require('./commands/createsuperuser')(program);
 require('./commands/lang')(program);
+require('./commands/key')(program);
 require('./commands/call')(program);
 
 // Unknown command handler

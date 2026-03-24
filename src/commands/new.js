@@ -36,6 +36,21 @@ module.exports = function (program) {
           installSpinner.succeed(chalk.green('  Dependencies installed!'));
         }
 
+        // Auto-generate APP_KEY into the new project's .env
+        try {
+          const { Encrypter } = require('../encryption/Encrypter');
+          const envPath = path.join(targetDir, '.env');
+          const key = Encrypter.generateKey('AES-256-CBC');
+          if (fs.existsSync(envPath)) {
+            let envContent = fs.readFileSync(envPath, 'utf8');
+            envContent = /^APP_KEY=/m.test(envContent)
+              ? envContent.replace(/^APP_KEY=.*$/m, `APP_KEY=${key}`)
+              : envContent + `\nAPP_KEY=${key}\n`;
+            fs.writeFileSync(envPath, envContent, 'utf8');
+            console.log(chalk.green('  ✔  Application key generated.'));
+          }
+        } catch { /* non-fatal — developer can run millas key:generate */ }
+
         console.log();
         console.log(chalk.bold('  Next steps:'));
         console.log(chalk.cyan(`    cd ${projectName}`));

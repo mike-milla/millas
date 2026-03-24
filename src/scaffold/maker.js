@@ -325,12 +325,33 @@ async function makeShape(name) {
   return write(filePath, lines.join('\n'));
 }
 async function makeCommand(name) {
-  const baseName  = name.endsWith('Command') ? name : `${name}Command`;
-  const className = pascalCase(baseName);
-  const signature = name
+  // If name contains ':' it's a namespaced signature like 'email:SendDigest'.
+  // Split off the namespace prefix and use only the last segment for the
+  // class name / filename, but keep the full input as the signature.
+  const parts      = name.split(':');
+  const basePart   = parts[parts.length - 1];                        // e.g. 'SendDigest'
+  const cleanBase  = basePart.replace(/Command$/i, '');              // strip trailing Command
+  const className  = pascalCase(cleanBase) + 'Command';              // e.g. 'SendDigestCommand'
+
+  // Build signature from the full name:
+  //   'email:SendDigest' → 'email:digest'
+  //   'SendDigest'       → 'send-digest'
+  //   'send-digest'      → 'send-digest'
+  const signatureParts = name
     .replace(/Command$/i, '')
-    .replace(/([a-z])([A-Z])/g, '$1:$2')
-    .toLowerCase();
+    .split(':')
+    .map((seg, i, arr) => {
+      // Last segment: strip camelCase — 'SendDigest' → 'send-digest'
+      if (i === arr.length - 1) {
+        return seg
+          .replace(/([a-z])([A-Z])/g, '$1-$2')
+          .toLowerCase();
+      }
+      // Namespace segments: lowercase as-is
+      return seg.toLowerCase();
+    });
+  const signature = signatureParts.join(':');
+
   const filePath = resolveAppPath('app/commands', `${className}.js`);
 
   const content = `'use strict';

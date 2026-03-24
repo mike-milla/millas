@@ -28,25 +28,57 @@ class CommandLoader {
 
   /**
    * Scan commandsDir and load all valid Command subclasses.
-   * Non-command files (missing signature / handle) are silently skipped.
+   * Files that throw on require() are reported as warnings — never silently skipped.
+   * Files that don't export a valid Command subclass are skipped with a clear message.
    *
    * @returns {Map<string, typeof Command>}
    */
   load() {
     if (!fs.existsSync(this._dir)) return this._commands;
 
+    const chalk = require('chalk');
+
     const files = fs.readdirSync(this._dir)
       .filter(f => f.endsWith('.js') && !f.startsWith('.') && !f.startsWith('_'));
 
     for (const file of files) {
+      const filePath = path.join(this._dir, file);
+
+      let CommandClass;
       try {
-        const CommandClass = require(path.join(this._dir, file));
-        if (!CommandClass || typeof CommandClass !== 'function') continue;
-        if (!CommandClass.signature || typeof CommandClass.prototype.handle !== 'function') continue;
-        this._commands.set(CommandClass.signature, CommandClass);
-      } catch {
-        // malformed file — skip silently; errors will surface when the command is run
+        CommandClass = require(filePath);
+      } catch (err) {
+        process.stderr.write(
+          chalk.red(`\n  ✖  Failed to load command file: ${chalk.bold(file)}\n`) +
+          chalk.dim(`     ${err.message}\n`) +
+          (process.env.DEBUG ? chalk.dim(err.stack + '\n') : '') +
+          '\n'
+        );
+        continue;
       }
+
+      if (!CommandClass || typeof CommandClass !== 'function') {
+        process.stderr.write(
+          chalk.yellow(`  ⚠  Skipping ${chalk.bold(file)} — does not export a class.\n`)
+        );
+        continue;
+      }
+
+      if (!CommandClass.signature) {
+        process.stderr.write(
+          chalk.yellow(`  ⚠  Skipping ${chalk.bold(file)} — missing static signature.\n`)
+        );
+        continue;
+      }
+
+      if (typeof CommandClass.prototype.handle !== 'function') {
+        process.stderr.write(
+          chalk.yellow(`  ⚠  Skipping ${chalk.bold(file)} — missing handle() method.\n`)
+        );
+        continue;
+      }
+
+      this._commands.set(CommandClass.signature, CommandClass);
     }
 
     return this._commands;
