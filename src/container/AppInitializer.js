@@ -55,7 +55,10 @@ class AppInitializer {
      */
     async boot() {
         await this.bootKernel();
-        await this._serve();
+        if (!process.env.MILLAS_CLI_MODE) {
+            await this._serve();
+        }
+        return this._kernel;
     }
 
     /**
@@ -82,6 +85,18 @@ class AppInitializer {
         const basePath          = cfg.basePath || process.cwd();
         const appConfig         = SecurityBootstrap.loadConfig(basePath + '/config/app');
         SecurityBootstrap.apply(this._adapter.nativeApp || expressApp, appConfig);
+
+        // ── CORS — applied immediately after security, before routes ──────────
+        // Only active when .withCors() was called in bootstrap/app.js.
+        // Config is read from the cors: {} block in config/app.js (already loaded
+        // above as appConfig). No cors key = CorsMiddleware class defaults apply.
+        if (cfg.cors !== null && cfg.cors !== undefined) {
+            const CorsMiddleware = require('../middleware/CorsMiddleware');
+            const corsMiddleware = new CorsMiddleware(appConfig.cors || {});
+            (this._adapter.nativeApp || expressApp).use(
+                this._adapter.wrapMiddleware(corsMiddleware, null)
+            );
+        }
         // ─────────────────────────────────────────────────────────────────────
 
         for (const mw of (cfg.adapterMiddleware || [])) {

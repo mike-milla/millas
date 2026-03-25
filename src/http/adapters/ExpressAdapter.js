@@ -167,11 +167,15 @@ class ExpressAdapter extends HttpAdapter {
         // Status
         expressRes.status(response.statusCode);
 
-        // CORS headers stored by CorsMiddleware on next() calls
-        const corsHeaders = expressRes.req?._corsHeaders;
-        if (corsHeaders) {
-            for (const [name, value] of Object.entries(corsHeaders)) {
-                expressRes.setHeader(name, value);
+        // Headers stashed by middleware during the request pipeline
+        // (e.g. CorsMiddleware → _corsHeaders, ThrottleMiddleware → _rateLimitHeaders)
+        const corsHeaders      = expressRes.req?._corsHeaders;
+        const rateLimitHeaders = expressRes.req?._rateLimitHeaders;
+        for (const map of [corsHeaders, rateLimitHeaders]) {
+            if (map) {
+                for (const [name, value] of Object.entries(map)) {
+                    expressRes.setHeader(name, value);
+                }
             }
         }
 

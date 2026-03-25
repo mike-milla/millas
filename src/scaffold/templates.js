@@ -161,6 +161,18 @@ module.exports = {
   // Set use_i18n: true to enable the translation system.
   // Then run: millas lang:publish <locale>
   use_i18n: false,
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+  // Uncomment and call .withCors() in bootstrap/app.js to enable.
+  // All values shown are the defaults — only include what you need to change.
+  //
+  // cors: {
+  //   origins:     ['*'],                                          // or ['https://app.example.com']
+  //   methods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  //   headers:     ['Content-Type', 'Authorization', 'X-Requested-With'],
+  //   credentials: false,                                          // true requires explicit origins, not '*'
+  //   maxAge:      86400,                                          // preflight cache in seconds
+  // },
 };
 `,
 

@@ -24,6 +24,46 @@ module.exports = function (program) {
   const commandsDir = path.resolve(process.cwd(), 'app/commands');
   const CommandLoader = require('../console/CommandLoader');
 
+  // ── Bootstrap helpers ──────────────────────────────────────────────────────
+  async function bootstrapApp() {
+    const bootstrapPath = path.join(process.cwd(), 'bootstrap/app.js');
+    if (!fs.existsSync(bootstrapPath)) return;
+    
+    require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+    
+    const basePath = process.cwd();
+    const AppServiceProvider = require(path.join(basePath, 'providers/AppServiceProvider'));
+    const AppInitializer = require('../container/AppInitializer');
+    
+    const config = {
+      basePath,
+      providers: [AppServiceProvider],
+      routes: null,
+      middleware: [],
+      logging: true,
+      database: true,
+      auth: true,
+      cache: true,
+      storage: true,
+      mail: true,
+      queue: true,
+      events: true,
+      admin: null,
+      docs: null,
+      adapterMiddleware: [],
+    };
+    
+    const initializer = new AppInitializer(config);
+    await initializer.bootKernel();
+  }
+
+  async function closeDb() {
+    try {
+      const DatabaseManager = require('../orm/drivers/DatabaseManager');
+      await DatabaseManager.closeAll();
+    } catch {}
+  }
+
   // ── millas list ────────────────────────────────────────────────────────────
   program
     .command('list')
@@ -134,12 +174,17 @@ module.exports = function (program) {
       const instance = new CommandClass();
       instance._hydrate(argMap, parsedOpts);
 
+      // Prevent HTTP server from starting during CLI commands
+      process.env.MILLAS_CLI_MODE = '1';
+
       Promise.resolve()
+        .then(() => bootstrapApp())
         .then(() => instance.handle())
         .catch(err => {
           console.error(chalk.red(`\n  ✖  ${signature} failed: ${err.message}\n`));
           if (process.env.DEBUG) console.error(err.stack);
           process.exit(1);
-        });
+        })
+        .finally(() => closeDb());
     });
 };

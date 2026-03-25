@@ -42,7 +42,7 @@ class ThrottleMiddleware extends Middleware {
     return new ThrottleMiddleware({ max, window: minutes * 60 });
   }
 
-  async handle(req, next) {
+  async handle({ req }, next) {
     const key    = this.keyBy(req);
     const now    = Date.now();
     let   record = this._store.get(key);
@@ -57,12 +57,15 @@ class ThrottleMiddleware extends Middleware {
     const remaining = Math.max(0, this.max - record.count);
     const resetIn   = Math.ceil((record.resetAt - now) / 1000);
 
-    // Rate limit headers — added to whatever response comes back
-    // We set them on the raw Express res since we don't have the final response yet.
-    // These headers will be present on all responses from throttled routes.
-    req.raw.res.setHeader('X-RateLimit-Limit',     String(this.max));
-    req.raw.res.setHeader('X-RateLimit-Remaining', String(remaining));
-    req.raw.res.setHeader('X-RateLimit-Reset',     String(Math.ceil(record.resetAt / 1000)));
+    // Rate limit headers — set on the raw Express res since we don't have
+    // the final MillasResponse yet. Present on all responses from throttled routes.
+    // Stash rate-limit headers on the raw request so ExpressAdapter.dispatch()
+    // can apply them to the final MillasResponse — same pattern as CorsMiddleware.
+    req.raw._rateLimitHeaders = {
+      'X-RateLimit-Limit':     String(this.max),
+      'X-RateLimit-Remaining': String(remaining),
+      'X-RateLimit-Reset':     String(Math.ceil(record.resetAt / 1000)),
+    };
 
     if (record.count > this.max) {
       return jsonify({

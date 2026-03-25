@@ -11,6 +11,7 @@ const MillasResponse = require('../http/MillasResponse');
 class CorsMiddleware extends Middleware {
   constructor(options = {}) {
     super();
+
     this.origins     = options.origins     || ['*'];
     this.methods     = options.methods     || ['GET','POST','PUT','PATCH','DELETE','OPTIONS'];
     this.headers     = options.headers     || ['Content-Type','Authorization','X-Requested-With'];
@@ -23,7 +24,9 @@ class CorsMiddleware extends Middleware {
 
     // Build headers map
     const h = {};
+
     if (this.origins.includes('*')) {
+
       h['Access-Control-Allow-Origin'] = '*';
     } else if (origin && this.origins.includes(origin)) {
       h['Access-Control-Allow-Origin'] = origin;

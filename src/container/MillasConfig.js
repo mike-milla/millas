@@ -55,6 +55,10 @@ class MillasConfig {
             // Docs panel — null means disabled, {} or options object means enabled
             docs: null,
 
+            // CORS — null means disabled, true means enabled.
+            // All configuration comes from config/app.js cors: { ... }.
+            cors: null,
+
             // Raw adapter-level middleware (e.g. helmet, compression)
             adapterMiddleware: [],
 
@@ -147,6 +151,30 @@ class MillasConfig {
      */
     withDocs(options = {}) {
         this._config.docs = options;
+        return this;
+    }
+
+    /**
+     * Enable global CORS headers.
+     *
+     * Takes no arguments — all CORS settings are configured in config/app.js:
+     *
+     *   // config/app.js
+     *   cors: {
+     *     origins:     ['https://app.example.com'],
+     *     credentials: true,
+     *     methods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+     *     headers:     ['Content-Type', 'Authorization', 'X-Requested-With'],
+     *     maxAge:      86400,
+     *   }
+     *
+     * Omitting the cors key in config/app.js falls back to CorsMiddleware defaults
+     * (allow all origins, standard methods, no credentials).
+     *
+     *   .withCors()
+     */
+    withCors() {
+        this._config.cors = true;
         return this;
     }
 
