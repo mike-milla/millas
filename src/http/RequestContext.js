@@ -102,8 +102,10 @@ class RequestContext {
     // Uploaded files (populated by multer or similar middleware)
     // req.files → multi-file upload  { avatar: File, resume: File }
     // req.file  → single-file upload (multer .single())
-    this.files = millaReq.raw.files || {};
-    this.file  = millaReq.raw.file  || null;
+    // Prefer UploadedFile-wrapped instances set by UploadMiddleware (_millaFile/_millaFiles).
+    // Fall back to raw multer objects only if UploadMiddleware hasn't run.
+    this.file  = millaReq.raw._millaFile  || millaReq.raw.file  || null;
+    this.files = millaReq.raw._millaFiles || millaReq.raw.files || {};
 
     // ── headers ───────────────────────────────────────────────────────────────
     this.headers = millaReq.raw.headers || {};

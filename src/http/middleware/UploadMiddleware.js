@@ -121,7 +121,7 @@ class UploadMiddleware {
    */
   async handle(ctx, next) {
     const expressReq  = ctx.req.raw;
-    const contentType = expressReq.headers?.['content-type'] || '';
+    const contentType = ctx.headers?.['content-type'] || '';
 
     // Skip multer entirely for non-multipart requests.
     // ctx.file / ctx.files stay null/{} — the handler or shape validation
