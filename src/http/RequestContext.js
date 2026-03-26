@@ -98,9 +98,12 @@ class RequestContext {
     this.body = this._buildBody(rawBody, millaReq);
     this.json = this.body;   // alias
 
-    // ── files ─────────────────────────────────────────────────────────────────
+    // ── files / file ──────────────────────────────────────────────────────────
     // Uploaded files (populated by multer or similar middleware)
+    // req.files → multi-file upload  { avatar: File, resume: File }
+    // req.file  → single-file upload (multer .single())
     this.files = millaReq.raw.files || {};
+    this.file  = millaReq.raw.file  || null;
 
     // ── headers ───────────────────────────────────────────────────────────────
     this.headers = millaReq.raw.headers || {};

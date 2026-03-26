@@ -397,8 +397,14 @@ class FileValidator extends BaseValidator {
   }
 
   _checkType(value) {
-    // Files come through as multer file objects — just check it's present
+    // Accept both raw multer file objects and Millas UploadedFile instances.
+    // We check for the UploadedFile brand first (via constructor name or
+    // the presence of fieldName / mimeType getters), then fall back to the
+    // plain object check for raw multer objects (which have .fieldname).
     if (!value || typeof value !== 'object') return this._typeError || 'Must be a file';
+    const isUploadedFile = value.constructor?.name === 'UploadedFile';
+    const isMulterFile   = typeof value.fieldname === 'string' || typeof value.fieldName === 'string';
+    if (!isUploadedFile && !isMulterFile) return this._typeError || 'Must be a file';
     return null;
   }
 
@@ -410,7 +416,7 @@ class FileValidator extends BaseValidator {
     const bytes = typeof size === 'number' ? size : _parseSize(size);
     this._maxSizeBytes = bytes;
     return this._addRule(
-      v => !v?.size || v.size <= bytes,
+      v => !_fileSize(v) || _fileSize(v) <= bytes,
       msg || `File must not exceed ${size}`
     );
   }
@@ -424,7 +430,7 @@ class FileValidator extends BaseValidator {
     const allowed = Array.isArray(types) ? types : [types];
     this._mimeTypes = allowed;
     return this._addRule(
-      v => !v?.mimetype || allowed.includes(v.mimetype),
+      v => !_fileMime(v) || allowed.includes(_fileMime(v)),
       msg || `Must be one of: ${allowed.join(', ')}`
     );
   }
@@ -441,10 +447,25 @@ class FileValidator extends BaseValidator {
     const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
     this._mimeTypes = imageTypes;
     return this._addRule(
-      v => !v?.mimetype || imageTypes.includes(v.mimetype),
+      v => !_fileMime(v) || imageTypes.includes(_fileMime(v)),
       msg || 'Must be an image (jpeg, png, gif, webp, svg)'
     );
   }
+}
+
+// ── File accessor helpers ──────────────────────────────────────────────────────
+// Work with both UploadedFile instances (camelCase) and raw multer objects
+// (lowercase .mimetype / .fieldname) so validation rules are future-proof.
+
+function _fileMime(v) {
+  if (!v) return null;
+  // UploadedFile exposes .mimeType (getter), raw multer uses .mimetype
+  return v.mimeType ?? v.mimetype ?? null;
+}
+
+function _fileSize(v) {
+  if (!v) return null;
+  return v.size ?? null;
 }
 
 function _parseSize(str) {

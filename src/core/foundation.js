@@ -41,6 +41,9 @@ const { CacheServiceProvider, StorageServiceProvider } = require('../providers/C
 // ── Storage ───────────────────────────────────────────────────────
 const Storage     = require('../storage/Storage');
 const LocalDriver = require('../storage/drivers/LocalDriver');
+const S3Driver    = require('../storage/drivers/S3Driver');
+const UploadMiddleware = require('../http/middleware/UploadMiddleware');
+const UploadedFile     = require('../http/UploadedFile');
 // ── Serializer ────────────────────────────────────────────────────
 const { Serializer } = require('../serializer/Serializer');
 const {Str, FluentString} = require("../support/Str");
@@ -58,7 +61,10 @@ module.exports = {
   // Cache
   Cache, MemoryDriver, FileDriver, NullDriver, CacheServiceProvider,
   // Storage
-  Storage, LocalDriver, StorageServiceProvider,
+  Storage, LocalDriver, S3Driver, StorageServiceProvider,
+  // Upload
+  UploadMiddleware,
+  UploadedFile,
   // Serializer
   Serializer,
   // Support

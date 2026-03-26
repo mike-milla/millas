@@ -73,6 +73,15 @@ class Router {
     // validation middleware that runs BEFORE the handler.
     // On failure → 422 immediately, handler never runs.
     // On success → ctx.body is replaced with coerced, validated output.
+    //
+    // When the shape declares encoding:'multipart' or contains any file()
+    // field, UploadMiddleware is injected first (before validation) so that
+    // multer parses the multipart body and populates req.file / req.files /
+    // req.body before the validation step reads them.
+    const uploadMiddlewares = route.shape && this._shapeNeedsUpload(route.shape)
+      ? this._buildUploadMiddleware(route.shape)
+      : [];
+
     const shapeMiddlewares = route.shape
       ? this._buildShapeMiddleware(route.shape)
       : [];
@@ -87,9 +96,40 @@ class Router {
 
     this._adapter.mountRoute(route.verb, route.path, [
       ...middlewareHandlers,
+      ...uploadMiddlewares,
       ...shapeMiddlewares,
       terminalHandler,
     ]);
+  }
+
+  /**
+   * Returns true if the shape requires multipart parsing —
+   * either because encoding is explicitly set to 'multipart', or because
+   * the "in" schema contains at least one file() validator.
+   *
+   * @param {import('../http/Shape').ShapeDefinition} shape
+   * @returns {boolean}
+   */
+  _shapeNeedsUpload(shape) {
+    if (shape.encoding === 'multipart') return true;
+    if (!shape.in) return false;
+    return Object.values(shape.in).some(v => v?._type === 'file');
+  }
+
+  /**
+   * Build an Express middleware array that runs UploadMiddleware before
+   * the shape validation step. The UploadMiddleware is configured from
+   * the shape (field names, maxSize, mimeTypes) so developers don't have
+   * to configure it separately.
+   *
+   * @param {import('../http/Shape').ShapeDefinition} shape
+   * @returns {Function[]}
+   */
+  _buildUploadMiddleware(shape) {
+    const UploadMiddleware = require('../http/middleware/UploadMiddleware');
+    const instance = UploadMiddleware.fromShape(shape);
+    // Wrap it through the adapter so it becomes an Express (req,res,next) fn
+    return [this._adapter.wrapMiddleware(instance, this._container)];
   }
 
   /**
@@ -97,19 +137,57 @@ class Router {
    * Returns an array of 0, 1, or 2 middleware functions
    * (one for body/in, one for query) depending on what the shape declares.
    *
+   * For multipart routes, file fields from req.file / req.files are merged
+   * into the validation input so file() validators in the schema run correctly.
+   *
    * @param {import('../http/Shape').ShapeDefinition} shape
    * @returns {Function[]}
    */
   _buildShapeMiddleware(shape) {
     const { Validator } = require('../validation/Validator');
     const middlewares   = [];
+    const isMultipart   = this._shapeNeedsUpload(shape);
 
     // ── Body / in validation ───────────────────────────────────────────────
     if (shape.in && Object.keys(shape.in).length) {
       middlewares.push(async (req, res, next) => {
         try {
-          const rawBody = req.body || {};
-          const clean   = await Validator.validate(rawBody, shape.in);
+          // For multipart requests, merge uploaded files into the validation
+          // input so file() validators in the shape's "in" schema can run.
+          // req.file  → single file (multer .single())
+          // req.files → multiple files (multer .fields() or .any())
+          let rawBody = req.body || {};
+          if (isMultipart) {
+            const fileInputs = {};
+            // Prefer the already-wrapped UploadedFile instances written by
+            // UploadMiddleware so FileValidator receives the same UploadedFile
+            // objects that the handler will destructure.
+            if (req._millaFile) {
+              fileInputs[req._millaFile.fieldName] = req._millaFile;
+            }
+            if (req._millaFiles) {
+              for (const [fieldname, f] of Object.entries(req._millaFiles)) {
+                fileInputs[fieldname] = f;
+              }
+            }
+            // Fallback to raw multer objects if UploadMiddleware hasn't run
+            // (e.g. manual upload middleware setup without UploadMiddleware)
+            if (!Object.keys(fileInputs).length) {
+              if (req.file) fileInputs[req.file.fieldname] = req.file;
+              if (req.files) {
+                if (Array.isArray(req.files)) {
+                  for (const f of req.files) fileInputs[f.fieldname] = f;
+                } else {
+                  for (const [fieldname, arr] of Object.entries(req.files)) {
+                    fileInputs[fieldname] = arr.length === 1 ? arr[0] : arr;
+                  }
+                }
+              }
+            }
+            rawBody = { ...rawBody, ...fileInputs };
+          }
+
+          const clean = await Validator.validate(rawBody, shape.in);
           // Replace req.body with the coerced, validated subset so the
           // handler's { body } destructure gets clean data automatically.
           req.body = clean;

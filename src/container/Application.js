@@ -324,6 +324,8 @@ class Application {
         this._mwRegistry.register('throttle', ThrottleMiddleware);
         this._mwRegistry.register('log', new LogMiddleware());
         this._mwRegistry.register('auth', AuthMiddleware);
+        const UploadMiddleware = require('../http/middleware/UploadMiddleware');
+        this._mwRegistry.register('upload', new UploadMiddleware());
     }
 }
 

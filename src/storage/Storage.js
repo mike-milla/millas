@@ -129,6 +129,10 @@ class Storage {
     const driverName = diskConf.driver || name || 'local';
 
     switch (driverName) {
+      case 's3': {
+        const S3Driver = require('./drivers/S3Driver');
+        return new S3Driver(diskConf);
+      }
       case 'local':
       default: {
         const LocalDriver = require('./drivers/LocalDriver');

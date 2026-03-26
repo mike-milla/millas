@@ -761,7 +761,12 @@ class Model {
   }
 
   static _hydrate(row) {
-    return new this(row);
+    const fields = this.getFields();
+    const cast = {};
+    for (const [key, val] of Object.entries(row)) {
+      cast[key] = (fields[key]?.type === 'boolean' && val != null) ? Boolean(val) : val;
+    }
+    return new this(cast);
   }
 
   static async _hydrateFromTrx(id, trx) {
