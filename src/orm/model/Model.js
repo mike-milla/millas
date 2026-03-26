@@ -291,6 +291,7 @@ class Model {
     };
 
     payload = await this.beforeCreate(payload) ?? payload;
+    payload = this._serializeForDb(payload);
 
     const q     = trx ? trx(this.table) : this._db();
     const [id]  = await q.insert(payload);
@@ -658,6 +659,7 @@ class Model {
     };
 
     payload = await this.constructor.beforeUpdate(payload) ?? payload;
+    const dbPayload = this.constructor._serializeForDb(payload);
 
     const q = trx
       ? trx(this.constructor.table)
@@ -665,9 +667,9 @@ class Model {
 
     await q
       .where(this.constructor.primaryKey, this[this.constructor.primaryKey])
-      .update(payload);
+      .update(dbPayload);
 
-    Object.assign(this, payload);
+    Object.assign(this, payload);  // keep JS types on the instance, not serialized values
     await this.constructor.afterUpdate(this);
     return this;
   }
@@ -764,9 +766,41 @@ class Model {
     const fields = this.getFields();
     const cast = {};
     for (const [key, val] of Object.entries(row)) {
-      cast[key] = (fields[key]?.type === 'boolean' && val != null) ? Boolean(val) : val;
+      cast[key] = this._castValue(val, fields[key]?.type);
     }
     return new this(cast);
+  }
+
+  static _castValue(val, type) {
+    if (val == null) return val;
+    switch (type) {
+      case 'boolean':   return Boolean(val);
+      case 'integer':   return Number.isInteger(val) ? val : parseInt(val, 10);
+      case 'bigInteger':return typeof val === 'bigint' ? val : parseInt(val, 10);
+      case 'float':
+      case 'decimal':   return typeof val === 'number' ? val : parseFloat(val);
+      case 'json':      return typeof val === 'string' ? JSON.parse(val) : val;
+      case 'date':
+      case 'timestamp': return val instanceof Date ? val : new Date(val);
+      default:          return val;
+    }
+  }
+
+  static _serializeValue(val, type) {
+    if (val == null) return val;
+    if (type === 'json') return typeof val === 'string' ? val : JSON.stringify(val);
+    if (type === 'boolean') return val ? 1 : 0;
+    if ((type === 'date' || type === 'timestamp') && val instanceof Date) return val.toISOString();
+    return val;
+  }
+
+  static _serializeForDb(data) {
+    const fieldDefs = this.getFields();
+    const result = {};
+    for (const [key, val] of Object.entries(data)) {
+      result[key] = this._serializeValue(val, fieldDefs[key]?.type);
+    }
+    return result;
   }
 
   static async _hydrateFromTrx(id, trx) {

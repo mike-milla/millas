@@ -107,6 +107,13 @@ class AppInitializer {
 
         this._kernel._container.instance('basePath', basePath);
 
+        // ── Static file serving ───────────────────────────────────────────────
+        // Auto-serve each storage disk that has a baseUrl configured.
+        // Mirrors Laravel's public disk serving — zero config required.
+        // e.g. LocalDriver root=storage/uploads baseUrl=/storage
+        //      → GET /storage/avatars/photo.jpg serves the file directly.
+        this._serveStorageDisks(expressApp, basePath);
+
         const coreProviders = this._buildCoreProviders(cfg);
         this._kernel.providers([...coreProviders, ...cfg.providers]);
 
@@ -174,6 +181,42 @@ class AppInitializer {
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
+
+    _serveStorageDisks(expressApp, basePath) {
+        const express = require('express');
+        const path    = require('path');
+        const fs      = require('fs');
+
+        let storageConfig;
+        try {
+            storageConfig = require(basePath + '/config/storage');
+        } catch {
+            // Fall back to the same defaults StorageServiceProvider uses
+            storageConfig = {
+                default: 'local',
+                disks: {
+                    local:  { driver: 'local', root: 'storage/uploads', baseUrl: '/storage' },
+                    public: { driver: 'local', root: 'public/storage',  baseUrl: '/storage' },
+                },
+            };
+        }
+
+        const seen = new Set(); // avoid mounting the same baseUrl twice
+        for (const [, disk] of Object.entries(storageConfig.disks || {})) {
+            if (!disk.baseUrl || !disk.root) continue;
+            if (seen.has(disk.baseUrl)) continue;
+            seen.add(disk.baseUrl);
+
+            const absRoot = path.isAbsolute(disk.root)
+                ? disk.root
+                : path.join(basePath, disk.root);
+
+            // Ensure the directory exists so express.static doesn't warn
+            fs.mkdirSync(absRoot, { recursive: true });
+
+            expressApp.use(disk.baseUrl, express.static(absRoot));
+        }
+    }
 
     _buildCoreProviders(cfg) {
         const providers = [];
