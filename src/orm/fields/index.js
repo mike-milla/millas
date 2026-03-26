@@ -54,19 +54,10 @@ function _makeModelRef(model) {
     if (model === 'self') return null;
     return () => {
         const path = require('path');
-        const modelsDir = path.join(process.cwd(), 'app', 'models');
         try {
-            return require(path.join(modelsDir, model));
+            const all = require(path.join(process.cwd(), 'app', 'models', 'index.js'));
+            return all[model] ?? null;
         } catch {
-            try {
-                const fs = require('fs');
-                const files = fs.readdirSync(modelsDir);
-                const match = files.find(f =>
-                    f.replace(/\.js$/, '').toLowerCase() === model.toLowerCase()
-                );
-                if (match) return require(path.join(modelsDir, match));
-            } catch {
-            }
             return null;
         }
     };
@@ -124,6 +115,22 @@ const fields = {
 
     uuid(options = {}) {
         return new FieldDefinition('uuid', options);
+    },
+
+    email(options = {}) {
+        return new FieldDefinition('email', { max: 254, ...options });
+    },
+
+    url(options = {}) {
+        return new FieldDefinition('url', { max: 2048, ...options });
+    },
+
+    slug(options = {}) {
+        return new FieldDefinition('slug', { max: 255, ...options });
+    },
+
+    ipAddress(options = {}) {
+        return new FieldDefinition('ipAddress', { max: 45, ...options });
     },
 
     /**

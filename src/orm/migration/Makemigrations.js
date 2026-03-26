@@ -93,7 +93,14 @@ class Makemigrations {
     }
 
     // Strip internal flags before writing
-    ops.forEach(op => { delete op._needsDefault; delete op._madeNullable; });
+    ops.forEach(op => {
+      if (op._destructiveWarning) {
+        process.stderr.write(`\n  ⚠  ${op._destructiveWarning}\n`);
+      }
+      delete op._needsDefault;
+      delete op._madeNullable;
+      delete op._destructiveWarning;
+    });
 
     // ── Step 7: Compute file name and content ────────────────────────────────
     // Detect initial FIRST — isInitial must be known before naming the file
@@ -245,50 +252,48 @@ class Makemigrations {
   _opsToName(ops) {
     if (ops.length === 0) return 'auto';
 
-    // For initial migrations → 'initial'
-    // For single op → descriptive name
-    // For multiple ops → Django style: table_field1_field2 (up to 3 segments)
-
     if (ops.length === 1) {
       const op = ops[0];
       switch (op.type) {
-        // 0001_students        (initial already handled above)
         case 'CreateModel':  return op.table;
-        // 0009_delete_course
         case 'DeleteModel':  return `delete_${op.table}`;
-        // 0004_student_age4
         case 'AddField':     return `${op.table}_${op.column}`;
-        // 0008_remove_student_age8
         case 'RemoveField':  return `remove_${op.table}_${op.column}`;
-        // 0007_alter_student_age8
         case 'AlterField':   return `alter_${op.table}_${op.column}`;
-        // 0006_rename_age7_student_age8
         case 'RenameField':  return `rename_${op.oldColumn}_${op.table}_${op.newColumn}`;
         case 'RenameModel':  return `rename_${op.oldTable}`;
+        case 'AddIndex':     return `${op.table}_${(op.index.name || op.index.fields.join('_'))}_idx`;
+        case 'RemoveIndex':  return `remove_${op.table}_${(op.index.name || op.index.fields.join('_'))}_idx`;
+        case 'AlterUniqueTogether': return `${op.table}_unique_together`;
       }
     }
 
-    // Multiple ops — build Django-style compound name from each op's contribution
-    // 0005_remove_student_age4_student_age7  (Remove + Add)
-    const segments = ops.slice(0, 3).map(op => {
+    // Multiple ops — deduplicate tables, build a compact name
+    // Group by type prefix to avoid repetition
+    const seen   = new Set();
+    const parts  = [];
+    for (const op of ops.slice(0, 3)) {
+      const table = op.table || op.oldTable || 'change';
+      let segment;
       switch (op.type) {
-        case 'CreateModel':  return op.table;
-        case 'DeleteModel':  return `delete_${op.table}`;
-        case 'AddField':     return `${op.table}_${op.column}`;
-        case 'RemoveField':  return `${op.table}_${op.column}`;
-        case 'AlterField':   return `alter_${op.table}_${op.column}`;
-        case 'RenameField':  return `rename_${op.oldColumn}_${op.table}_${op.newColumn}`;
-        default: {
-          const table  = op.table || op.oldTable || 'change';
-          const detail = op.column || op.oldColumn || '';
-          return detail ? `${table}_${detail}` : table;
-        }
+        case 'CreateModel':  segment = table; break;
+        case 'DeleteModel':  segment = `delete_${table}`; break;
+        case 'AddField':     segment = `${table}_${op.column}`; break;
+        case 'RemoveField':  segment = `${table}_${op.column}`; break;
+        case 'AlterField':   segment = `alter_${table}_${op.column}`; break;
+        case 'RenameField':  segment = `rename_${op.oldColumn}_${table}_${op.newColumn}`; break;
+        case 'AddIndex':     segment = `${table}_idx`; break;
+        case 'RemoveIndex':  segment = `${table}_idx`; break;
+        case 'AlterUniqueTogether': segment = `${table}_unique`; break;
+        default:             segment = table;
       }
-    });
-    // Prefix with 'remove_' only when first op is a RemoveField (matches Django)
+      if (!seen.has(segment)) {
+        seen.add(segment);
+        parts.push(segment);
+      }
+    }
     const prefix = ops[0]?.type === 'RemoveField' ? 'remove_' : '';
-    const joined = prefix + segments.join('_');
-    return joined || 'auto';
+    return (prefix + parts.join('_')) || 'auto';
   }
 
   /**

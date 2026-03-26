@@ -109,6 +109,10 @@ function _buildColumn(t, name, def, opts = {}) {
       return null; // increments() doesn't return a chainable column builder
 
     case 'string':
+    case 'email':
+    case 'url':
+    case 'slug':
+    case 'ipAddress':
       return t.string(name, def.max || 255);
 
     case 'text':

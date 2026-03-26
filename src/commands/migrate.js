@@ -34,8 +34,22 @@ module.exports = function (program) {
             // Match Django's +/-/~ prefix style exactly
             let prefix, label;
             switch (op.type) {
-              case 'CreateModel':
-                prefix = chalk.green('+'); label = `Create model ${op.table}`; break;
+              case 'CreateModel': {
+                const idxLines = [];
+                for (const idx of (op.indexes || [])) {
+                  const l = idx.name
+                    ? `${idx.name} on ${op.table}`
+                    : `on field(s) ${idx.fields.join(', ')} of model ${op.table}`;
+                  idxLines.push(`      ${chalk.green('+')} Create index ${l}`);
+                }
+                for (const ut of (op.uniqueTogether || [])) {
+                  idxLines.push(`      ${chalk.green('+')} Create constraint on ${op.table} (${ut.join(', ')})`);
+                }
+                prefix = chalk.green('+'); label = `Create model ${op.table}`;
+                console.log(chalk.gray(`      ${prefix} ${label}`));
+                idxLines.forEach(l => console.log(chalk.gray(l)));
+                return; // return from forEach callback
+              }
               case 'DeleteModel':
                 prefix = chalk.red('-');   label = `Delete model ${op.table}`; break;
               case 'AddField':
@@ -48,6 +62,24 @@ module.exports = function (program) {
                 prefix = chalk.yellow('~'); label = `Rename field ${op.oldColumn} on ${op.table} to ${op.newColumn}`; break;
               case 'RenameModel':
                 prefix = chalk.yellow('~'); label = `Rename model ${op.oldTable} to ${op.newTable}`; break;
+              case 'AddIndex': {
+                const idx = op.index;
+                const idxLabel = idx.name
+                  ? `${idx.name} on ${op.table}`
+                  : `on field(s) ${idx.fields.join(', ')} of model ${op.table}`;
+                prefix = chalk.green('+'); label = `Create index ${idxLabel}`; break;
+              }
+              case 'RemoveIndex': {
+                const idx = op.index;
+                const idxLabel = idx.name
+                  ? `${idx.name} from ${op.table}`
+                  : `on field(s) ${idx.fields.join(', ')} of model ${op.table}`;
+                prefix = chalk.red('-');   label = `Remove index ${idxLabel}`; break;
+              }
+              case 'RenameIndex':
+                prefix = chalk.yellow('~'); label = `Rename index ${op.oldName} on ${op.table} to ${op.newName}`; break;
+              case 'AlterUniqueTogether':
+                prefix = chalk.yellow('~'); label = `Alter unique_together on ${op.table}`; break;
               default:
                 prefix = chalk.gray(' ');   label = op.type;
             }

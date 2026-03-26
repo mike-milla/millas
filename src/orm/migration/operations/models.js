@@ -28,16 +28,20 @@ class CreateModel extends BaseOperation {
   /**
    * @param {string} table
    * @param {object} fields  — { columnName: normalisedFieldDef }
+   * @param {Array}  [indexes]
+   * @param {Array}  [uniqueTogether]
    */
-  constructor(table, fields) {
+  constructor(table, fields, indexes = [], uniqueTogether = []) {
     super();
-    this.type   = 'CreateModel';
-    this.table  = table;
-    this.fields = fields;
+    this.type          = 'CreateModel';
+    this.table         = table;
+    this.fields        = fields;
+    this.indexes       = indexes;
+    this.uniqueTogether = uniqueTogether;
   }
 
   applyState(state) {
-    state.createModel(this.table, this.fields);
+    state.createModel(this.table, this.fields, this.indexes, this.uniqueTogether);
   }
 
   // Standard up() — inline FKs. Safe when only one CreateModel in a migration.
@@ -47,6 +51,7 @@ class CreateModel extends BaseOperation {
         applyColumn(t, name, normaliseField(def));
       }
     });
+    await this._applyIndexes(db);
   }
 
   /**
@@ -59,6 +64,7 @@ class CreateModel extends BaseOperation {
         applyColumn(t, name, { ...normaliseField(def), references: null });
       }
     });
+    await this._applyIndexes(db);
   }
 
   /**
@@ -76,8 +82,28 @@ class CreateModel extends BaseOperation {
     await db.schema.dropTableIfExists(this.table);
   }
 
+  async _applyIndexes(db) {
+    const { indexName } = require('./indexes');
+    const all = [
+      ...(this.indexes || []),
+    ];
+    const ut = this.uniqueTogether || [];
+    if (!all.length && !ut.length) return;
+    await db.schema.table(this.table, (t) => {
+      for (const idx of all) {
+        const name = idx.name || indexName(this.table, idx.fields, idx.unique);
+        if (idx.unique) t.unique(idx.fields, { indexName: name });
+        else            t.index(idx.fields, name);
+      }
+      for (const fields of ut) {
+        const name = `${this.table}_${fields.join('_')}_unique`;
+        t.unique(fields, { indexName: name });
+      }
+    });
+  }
+
   toJSON() {
-    return { type: 'CreateModel', table: this.table, fields: this.fields };
+    return { type: 'CreateModel', table: this.table, fields: this.fields, indexes: this.indexes, uniqueTogether: this.uniqueTogether };
   }
 }
 

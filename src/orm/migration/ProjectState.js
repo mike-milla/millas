@@ -1,6 +1,7 @@
 'use strict';
 
 const { tableFromClass, modelNameToTable, isSnakeCase } = require('./utils');
+const { indexName } = require('./operations/indexes');
 
 /**
  * ProjectState
@@ -29,7 +30,7 @@ class ProjectState {
 
   // ─── Mutation (called by operations during replay) ────────────────────────
 
-  createModel(table, fields) {
+  createModel(table, fields, indexes = [], uniqueTogether = []) {
     if (this.models.has(table)) {
       throw new Error(`ProjectState: table "${table}" already exists`);
     }
@@ -37,11 +38,37 @@ class ProjectState {
     for (const [name, def] of Object.entries(fields)) {
       fieldMap.set(name, normaliseField(def));
     }
-    this.models.set(table, { table, fields: fieldMap });
+    this.models.set(table, { table, fields: fieldMap, indexes: [...indexes], uniqueTogether: [...uniqueTogether] });
   }
 
   deleteModel(table) {
     this.models.delete(table);
+  }
+
+  addIndex(table, index) {
+    const model = this._requireModel(table);
+    model.indexes = model.indexes || [];
+    model.indexes.push(index);
+  }
+
+  removeIndex(table, index) {
+    const model = this._requireModel(table);
+    model.indexes = (model.indexes || []).filter(
+      i => JSON.stringify(i) !== JSON.stringify(index)
+    );
+  }
+
+  renameIndex(table, oldName, newName) {
+    const model = this._requireModel(table);
+    model.indexes = (model.indexes || []).map(i => {
+      const iName = i.name || indexName(model.table, i.fields, i.unique);
+      return iName === oldName ? { ...i, name: newName } : i;
+    });
+  }
+
+  alterUniqueTogether(table, uniqueTogether) {
+    const model = this._requireModel(table);
+    model.uniqueTogether = uniqueTogether;
   }
 
   addField(table, column, fieldDef) {
@@ -91,9 +118,13 @@ class ProjectState {
   toSchema() {
     const schema = {};
     for (const [table, model] of this.models) {
-      schema[table] = {};
+      schema[table] = {
+        fields:        {},
+        indexes:       model.indexes       || [],
+        uniqueTogether: model.uniqueTogether || [],
+      };
       for (const [col, def] of model.fields) {
-        schema[table][col] = { ...def };
+        schema[table].fields[col] = { ...def };
       }
     }
     return schema;
@@ -107,7 +138,12 @@ class ProjectState {
       for (const [col, def] of model.fields) {
         fieldMap.set(col, { ...def });
       }
-      copy.models.set(table, { table, fields: fieldMap });
+      copy.models.set(table, {
+        table,
+        fields:         fieldMap,
+        indexes:        JSON.parse(JSON.stringify(model.indexes || [])),
+        uniqueTogether: JSON.parse(JSON.stringify(model.uniqueTogether || [])),
+      });
     }
     return copy;
   }

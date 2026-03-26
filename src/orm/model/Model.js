@@ -173,16 +173,22 @@ class Model {
 
     while (cur && cur !== Function.prototype) {
       if (Object.prototype.hasOwnProperty.call(cur, 'fields')) {
-        chain.unshift(cur.fields); // ancestor first → child wins in Object.assign
+        chain.unshift(cur.fields);
       }
       const curTable = cur.table || cur.name;
-      // Stop walking when we reach a non-abstract ancestor with a different table
-      // (that's a separate model with its own migration — don't merge its fields)
       if (cur !== this && !cur.abstract && curTable !== myTable) break;
       cur = Object.getPrototypeOf(cur);
     }
 
-    const merged = Object.assign({}, ...chain);
+    let merged = Object.assign({}, ...chain);
+
+    // Auto-inject id if no primary key is declared — same as Django
+    const hasPk = Object.values(merged).some(f => f?.primary === true || f?.type === 'id');
+    if (!hasPk) {
+      const { fields } = require('../fields/index');
+      merged = { id: fields.id(), ...merged };
+    }
+
     Object.defineProperty(this, '_cachedFields', {
       value: merged, writable: true, configurable: true, enumerable: false,
     });
@@ -774,15 +780,21 @@ class Model {
   static _castValue(val, type) {
     if (val == null) return val;
     switch (type) {
-      case 'boolean':   return Boolean(val);
-      case 'integer':   return Number.isInteger(val) ? val : parseInt(val, 10);
-      case 'bigInteger':return typeof val === 'bigint' ? val : parseInt(val, 10);
+      case 'boolean':    return Boolean(val);
+      case 'integer':    return Number.isInteger(val) ? val : parseInt(val, 10);
+      case 'bigInteger': return typeof val === 'bigint' ? val : parseInt(val, 10);
       case 'float':
-      case 'decimal':   return typeof val === 'number' ? val : parseFloat(val);
-      case 'json':      return typeof val === 'string' ? JSON.parse(val) : val;
+      case 'decimal':    return typeof val === 'number' ? val : parseFloat(val);
+      case 'json':       return typeof val === 'string' ? JSON.parse(val) : val;
       case 'date':
-      case 'timestamp': return val instanceof Date ? val : new Date(val);
-      default:          return val;
+      case 'timestamp':  return val instanceof Date ? val : new Date(val);
+      // string-backed types — no casting needed
+      case 'string':
+      case 'email':
+      case 'url':
+      case 'slug':
+      case 'ipAddress':  return String(val);
+      default:           return val;
     }
   }
 

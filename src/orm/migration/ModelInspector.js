@@ -484,6 +484,10 @@ ${this._renderColumn('      ', diff.column, diff.previous, '.alter()')}
                 return `${indent}t.increments('${name}')${suffix};`;
 
             case 'string':
+            case 'email':
+            case 'url':
+            case 'slug':
+            case 'ipAddress':
                 line = `t.string('${name}', ${field.max || 255})`;
                 break;
 

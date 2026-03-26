@@ -381,7 +381,7 @@ class QueryBuilder {
   async _eagerLoad(instances) {
     if (!instances.length) return;
 
-    const relations = this._model.relations || {};
+    const relations = this._model._effectiveRelations();
 
     for (const { name, constraint, aggregate, aggregateColumn } of this._withs) {
 

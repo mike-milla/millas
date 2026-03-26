@@ -2,6 +2,7 @@
 
 const { CreateModel, DeleteModel, RenameModel } = require('./models');
 const { AddField, RemoveField, AlterField, RenameField } = require('./fields');
+const { AddIndex, RemoveIndex, AlterUniqueTogether, RenameIndex } = require('./indexes');
 const { RunSQL } = require('./special');
 const { modelNameToTable, isSnakeCase } = require('../utils');
 
@@ -42,13 +43,17 @@ const { modelNameToTable, isSnakeCase } = require('../utils');
  */
 function deserialise(op) {
   switch (op.type) {
-    case 'CreateModel':  return new CreateModel(op.table, op.fields);
+    case 'CreateModel':  return new CreateModel(op.table, op.fields, op.indexes || [], op.uniqueTogether || []);
     case 'DeleteModel':  return new DeleteModel(op.table, op.fields);
     case 'RenameModel':  return new RenameModel(op.oldTable, op.newTable);
     case 'AddField':     return new AddField(op.table, op.column, op.field, op.oneOffDefault);
     case 'RemoveField':  return new RemoveField(op.table, op.column, op.field);
     case 'AlterField':   return new AlterField(op.table, op.column, op.field, op.previousField);
     case 'RenameField':  return new RenameField(op.table, op.oldColumn, op.newColumn);
+    case 'AddIndex':            return new AddIndex(op.table, op.index);
+    case 'RemoveIndex':         return new RemoveIndex(op.table, op.index);
+    case 'RenameIndex':         return new RenameIndex(op.table, op.oldName, op.newName);
+    case 'AlterUniqueTogether': return new AlterUniqueTogether(op.table, op.newUnique, op.oldUnique);
     case 'RunSQL':       return new RunSQL(op.sql, op.reverseSql);
     default:
       throw new Error(`Unknown migration operation type: "${op.type}"`);
@@ -63,10 +68,10 @@ function deserialise(op) {
  */
 const migrations = {
 
-  CreateModel({ name, fields: fieldList = [] }) {
+  CreateModel({ name, fields: fieldList = [], indexes = [], uniqueTogether = [] }) {
     const fields = {};
     for (const [col, def] of fieldList) fields[col] = def;
-    return { type: 'CreateModel', table: _tableFromName(name), fields };
+    return { type: 'CreateModel', table: _tableFromName(name), fields, indexes, uniqueTogether };
   },
 
   DeleteModel({ name, fields: fieldList = [] }) {
@@ -99,6 +104,22 @@ const migrations = {
 
   RenameField({ modelName, oldName, newName }) {
     return { type: 'RenameField', table: modelName, oldColumn: oldName, newColumn: newName };
+  },
+
+  AddIndex({ modelName, index }) {
+    return { type: 'AddIndex', table: modelName, index };
+  },
+
+  RemoveIndex({ modelName, index }) {
+    return { type: 'RemoveIndex', table: modelName, index };
+  },
+
+  RenameIndex({ modelName, oldName, newName }) {
+    return { type: 'RenameIndex', table: modelName, oldName, newName };
+  },
+
+  AlterUniqueTogether({ modelName, newUnique, oldUnique = [] }) {
+    return { type: 'AlterUniqueTogether', table: modelName, newUnique, oldUnique };
   },
 
   RunSQL({ sql, reverseSql = null }) {

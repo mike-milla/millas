@@ -84,8 +84,10 @@ class ModelScanner {
 
     // Build state from the canonical (most-derived) class per table
     for (const [table, cls] of tableToClass) {
-      const fields = this._resolveFields(cls, classes, tableToClass);
-      state.createModel(table, fields);
+      const fields        = this._resolveFields(cls, classes, tableToClass);
+      const indexes       = cls.indexes       || [];
+      const uniqueTogether = cls.uniqueTogether || [];
+      state.createModel(table, fields, indexes, uniqueTogether);
     }
 
     return state;
@@ -162,7 +164,7 @@ class ModelScanner {
 
 
   _resolveFields(cls, allClasses, tableToClass) {
-    const fields = {};
+    let fields = {};
 
     // Walk the prototype chain collecting fields, child overrides parent
     const chain = this._inheritanceChain(cls);
@@ -191,16 +193,20 @@ class ModelScanner {
       if (ancestor.fields && typeof ancestor.fields === 'object') {
         for (const [name, def] of Object.entries(ancestor.fields)) {
           if (def && typeof def === 'object' && def.type === 'm2m') continue; // skip M2M
-          // null = explicit removal, like Django's title = None — remove from merged set
           if (def === null) { delete fields[name]; continue; }
-          // Django convention: ForeignKey declared as 'landlord' creates column 'landlord_id'.
-          // If already ends with _id, use as-is to avoid double-appending.
           const colName = (def && def._isForeignKey && !name.endsWith('_id'))
             ? name + '_id'
             : name;
           fields[colName] = normaliseField(def);
         }
       }
+    }
+
+    // Auto-inject id if no primary key declared — same as Django
+    const hasPk = Object.values(fields).some(f => f?.type === 'id' || f?.primary === true);
+    if (!hasPk) {
+      const { fields: fieldDefs } = require('../fields/index');
+      fields = { id: normaliseField(fieldDefs.id()), ...fields };
     }
 
     return fields;

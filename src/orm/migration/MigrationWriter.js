@@ -36,6 +36,7 @@
  */
 
 const { fieldsEqual } = require('./utils');
+const { indexName }   = require('./operations/indexes');
 
 const MILLAS_VERSION = (() => {
   try { return require('../../..').version || require('../../../package.json').version; } catch {}
@@ -65,37 +66,44 @@ class MigrationWriter {
     const histSch = historyState.toSchema();
     const currSch = currentState.toSchema();
 
+    // ── helpers to get fields/indexes from new schema shape ──────────────────
+    const getFields        = (s, t) => s[t]?.fields        ?? s[t] ?? {};
+    const getIndexes       = (s, t) => s[t]?.indexes        ?? [];
+    const getUniqueTogether = (s, t) => s[t]?.uniqueTogether ?? [];
+
     // New tables
     const newTableOps = [];
     for (const table of Object.keys(currSch)) {
       if (SYSTEM_TABLES.has(table)) continue;
       if (!histSch[table]) {
-        newTableOps.push({ type: 'CreateModel', table, fields: currSch[table] });
+        newTableOps.push({
+          type:          'CreateModel',
+          table,
+          fields:        getFields(currSch, table),
+          indexes:       getIndexes(currSch, table),
+          uniqueTogether: getUniqueTogether(currSch, table),
+        });
       }
     }
-
-    // Topologically sort new CreateModel ops so that if Post has a FK → users,
-    // CreateModel(users) appears before CreateModel(posts) in the migration file.
-    // Cycles are detected and noted — the two-pass FK creation in Operations.js
-    // handles them safely at migrate time.
     ops.push(...this._sortCreateModels(newTableOps));
 
     // Dropped tables
     for (const table of Object.keys(histSch)) {
       if (SYSTEM_TABLES.has(table)) continue;
       if (!currSch[table]) {
-        ops.push({ type: 'DeleteModel', table, fields: histSch[table] });
+        ops.push({ type: 'DeleteModel', table, fields: getFields(histSch, table) });
       }
     }
 
-    // Column-level changes
+    // Column-level + index-level changes
     for (const table of Object.keys(currSch)) {
       if (SYSTEM_TABLES.has(table)) continue;
       if (!histSch[table]) continue;
 
-      const curr = currSch[table];
-      const prev = histSch[table];
+      const curr = getFields(currSch, table);
+      const prev = getFields(histSch, table);
 
+      // Added columns
       for (const col of Object.keys(curr)) {
         if (!prev[col]) {
           const field = curr[col];
@@ -105,14 +113,61 @@ class MigrationWriter {
                               !!histSch[table];
           ops.push({ type: 'AddField', table, column: col, field, _needsDefault: isDangerous });
         } else if (!this._fieldsEqual(curr[col], prev[col])) {
-          ops.push({ type: 'AlterField', table, column: col, field: curr[col], previousField: prev[col] });
+          const op = { type: 'AlterField', table, column: col, field: curr[col], previousField: prev[col] };
+          // Warn on destructive type changes — same as Django's warning
+          if (this._isDestructiveTypeChange(prev[col].type, curr[col].type)) {
+            op._destructiveWarning =
+              `Warning: changing '${table}.${col}' from ${prev[col].type} to ${curr[col].type} ` +
+              `may cause data loss. Existing data cannot be automatically converted.`;
+          }
+          ops.push(op);
         }
       }
 
+      // Removed columns
       for (const col of Object.keys(prev)) {
         if (!curr[col]) {
           ops.push({ type: 'RemoveField', table, column: col, field: prev[col] });
         }
+      }
+
+      // ── Index diffs ────────────────────────────────────────────────────────
+      const currIndexes = getIndexes(currSch, table);
+      const prevIndexes = getIndexes(histSch, table);
+
+      const prevIdxKeys = new Set(prevIndexes.map(i => JSON.stringify(i)));
+      const currIdxKeys = new Set(currIndexes.map(i => JSON.stringify(i)));
+
+      // Detect renames: same fields, different name
+      const addedIdxs   = currIndexes.filter(i => !prevIdxKeys.has(JSON.stringify(i)));
+      const removedIdxs = prevIndexes.filter(i => !currIdxKeys.has(JSON.stringify(i)));
+
+      for (const added of addedIdxs) {
+        const matchingRemoved = removedIdxs.find(
+          r => JSON.stringify(r.fields) === JSON.stringify(added.fields) &&
+               r.unique === added.unique &&
+               r.name !== added.name
+        );
+        if (matchingRemoved) {
+          // It's a rename
+          const oldName = matchingRemoved.name || indexName(table, matchingRemoved.fields, matchingRemoved.unique);
+          const newName = added.name           || indexName(table, added.fields, added.unique);
+          ops.push({ type: 'RenameIndex', table, oldName, newName, fields: added.fields });
+          removedIdxs.splice(removedIdxs.indexOf(matchingRemoved), 1);
+        } else {
+          ops.push({ type: 'AddIndex', table, index: added });
+        }
+      }
+      for (const idx of removedIdxs) {
+        ops.push({ type: 'RemoveIndex', table, index: idx });
+      }
+
+      // ── uniqueTogether diffs ───────────────────────────────────────────────
+      const currUT = getUniqueTogether(currSch, table);
+      const prevUT = getUniqueTogether(histSch, table);
+      if (JSON.stringify(currUT.map(s => [...s].sort()).sort()) !==
+          JSON.stringify(prevUT.map(s => [...s].sort()).sort())) {
+        ops.push({ type: 'AlterUniqueTogether', table, newUnique: currUT, oldUnique: prevUT });
       }
     }
 
@@ -166,15 +221,22 @@ ${opsCode},
   _renderOp(op) {
     switch (op.type) {
 
-      case 'CreateModel':
+      case 'CreateModel': {
+        const idxCode = op.indexes?.length
+          ? `,\n      indexes: ${JSON.stringify(op.indexes)}`
+          : '';
+        const utCode = op.uniqueTogether?.length
+          ? `,\n      uniqueTogether: ${JSON.stringify(op.uniqueTogether)}`
+          : '';
         return `migrations.CreateModel({\n` +
                `      name: '${this._modelName(op.table)}',\n` +
                `      fields: [\n` +
                Object.entries(op.fields)
                  .map(([col, def]) => `        ['${col}', ${this._renderField(def)}],`)
                  .join('\n') + '\n' +
-               `      ],\n` +
+               `      ]${idxCode}${utCode},\n` +
                `    })`;
+      }
 
       case 'DeleteModel':
         // Django omits fields= — not needed in the migration file
@@ -220,6 +282,32 @@ ${opsCode},
         return `migrations.RenameModel({\n` +
                `      oldName: '${op.oldTable}',\n` +
                `      newName: '${op.newTable}',\n` +
+               `    })`;
+
+      case 'AddIndex':
+        return `migrations.AddIndex({\n` +
+               `      modelName: '${op.table}',\n` +
+               `      index: ${JSON.stringify(op.index)},\n` +
+               `    })`;
+
+      case 'RemoveIndex':
+        return `migrations.RemoveIndex({\n` +
+               `      modelName: '${op.table}',\n` +
+               `      index: ${JSON.stringify(op.index)},\n` +
+               `    })`;
+
+      case 'RenameIndex':
+        return `migrations.RenameIndex({\n` +
+               `      modelName: '${op.table}',\n` +
+               `      oldName: '${op.oldName}',\n` +
+               `      newName: '${op.newName}',\n` +
+               `    })`;
+
+      case 'AlterUniqueTogether':
+        return `migrations.AlterUniqueTogether({\n` +
+               `      modelName: '${op.table}',\n` +
+               `      newUnique: ${JSON.stringify(op.newUnique)},\n` +
+               `      oldUnique: ${JSON.stringify(op.oldUnique)},\n` +
                `    })`;
 
       case 'RunSQL':
@@ -458,6 +546,22 @@ ${opsCode},
   }
 
   _fieldsEqual(a, b) { return fieldsEqual(a, b); }
+
+  /**
+   * Returns true when changing from oldType to newType risks data loss.
+   * Mirrors Django's check_for_system_checks / check_for_data_loss logic.
+   */
+  _isDestructiveTypeChange(oldType, newType) {
+    if (oldType === newType) return false;
+    // String-family — safe between each other
+    const stringFamily = new Set(['string', 'text', 'email', 'url', 'slug', 'ipAddress']);
+    if (stringFamily.has(oldType) && stringFamily.has(newType)) return false;
+    // Number-family — safe between each other (widening)
+    const numberFamily = new Set(['integer', 'bigInteger', 'float', 'decimal']);
+    if (numberFamily.has(oldType) && numberFamily.has(newType)) return false;
+    // Everything else is potentially destructive
+    return true;
+  }
 }
 
 module.exports = MigrationWriter;
