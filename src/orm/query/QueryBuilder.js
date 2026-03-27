@@ -561,6 +561,38 @@ class QueryBuilder {
         continue;
       }
 
+      // -- Nested dot notation: 'documents.document_images'
+      // Matches Django's prefetch_related('documents__document_images')
+      if (name.includes('.')) {
+        const [parentRel, ...rest] = name.split('.');
+        const nestedName = rest.join('.');
+        const parentRelDef = relations[parentRel];
+        if (!parentRelDef) {
+          MillasLog.w('ORM', `Relation "${parentRel}" not defined on ${this._model.name} -- skipping nested eager load`);
+          continue;
+        }
+        const alreadyLoaded = instances[0]?.[parentRel] !== undefined &&
+          typeof instances[0]?.[parentRel] !== 'function';
+        if (!alreadyLoaded) {
+          await parentRelDef.eagerLoad(instances, parentRel, null);
+        }
+        const parentInstances = instances.flatMap(i => {
+          const val = i[parentRel];
+          if (!val) return [];
+          return Array.isArray(val) ? val : [val];
+        });
+        if (parentInstances.length) {
+          const RelatedModel = parentRelDef._related;
+          if (RelatedModel) {
+            const QB = require('./QueryBuilder');
+            const subQb = new QB(RelatedModel._db(), RelatedModel);
+            subQb._withs = [{ name: nestedName, constraint: null }];
+            await subQb._eagerLoad(parentInstances);
+          }
+        }
+        continue;
+      }
+
       // ── Normal eager load ─────────────────────────────────────────────────
       const rel = relations[name];
       if (!rel) {
