@@ -145,7 +145,7 @@ class QueryEngine {
     // ── Execute data + count in parallel ──────────────────────────────────
     const [rows, countResult] = await Promise.all([
       q.clone().limit(limit).offset(offset),
-      q.clone().count('* as count').first(),
+      q.clone().clearOrder().clearSelect().count('* as count').first(),
     ]);
 
     const total = Number(countResult?.count ?? 0);
@@ -231,12 +231,12 @@ class QueryEngine {
       case 'in':           return q.whereIn(col, Array.isArray(value) ? value : [value]);
       case 'notin':        return q.whereNotIn(col, Array.isArray(value) ? value : [value]);
       case 'between':      return q.whereBetween(col, Array.isArray(value) ? value : [value, value]);
-      case 'contains':
-      case 'icontains':    return q.where(col, 'like', `%${value}%`);
-      case 'startswith':
-      case 'istartswith':  return q.where(col, 'like', `${value}%`);
-      case 'endswith':
-      case 'iendswith':    return q.where(col, 'like', `%${value}`);
+      case 'contains':     return q.where(col, 'like', `%${value}%`);
+      case 'icontains':    return q.where(q.client?.config?.client?.includes('pg') ? col : col, q.client?.config?.client?.includes('pg') ? 'ilike' : 'like', `%${value}%`);
+      case 'startswith':   return q.where(col, 'like', `${value}%`);
+      case 'istartswith':  return q.where(col, q.client?.config?.client?.includes('pg') ? 'ilike' : 'like', `${value}%`);
+      case 'endswith':     return q.where(col, 'like', `%${value}`);
+      case 'iendswith':    return q.where(col, q.client?.config?.client?.includes('pg') ? 'ilike' : 'like', `%${value}`);
       default:             return q.where(key, value);
     }
   }
@@ -246,15 +246,19 @@ class QueryEngine {
    * Uses strftime for SQLite/MySQL; falls back gracefully on PostgreSQL.
    */
   _applyDateHierarchy(q, col, year, month) {
+    const client = q.client?.config?.client || 'sqlite3';
+    const isPg   = client.includes('pg') || client.includes('postgres');
+    const isMy   = client.includes('mysql') || client.includes('maria');
+
     if (year) {
-      try {
-        q = q.whereRaw(`strftime('%Y', \`${col}\`) = ?`, [String(year)]);
-      } catch { /* PG fallback — skip */ }
+      if (isPg)      q = q.whereRaw(`EXTRACT(YEAR FROM "${col}") = ?`, [Number(year)]);
+      else if (isMy) q = q.whereRaw(`YEAR(\`${col}\`) = ?`, [Number(year)]);
+      else           q = q.whereRaw(`strftime('%Y', \`${col}\`) = ?`, [String(year)]);
     }
     if (month) {
-      try {
-        q = q.whereRaw(`strftime('%m', \`${col}\`) = ?`, [String(month).padStart(2, '0')]);
-      } catch { /* PG fallback — skip */ }
+      if (isPg)      q = q.whereRaw(`EXTRACT(MONTH FROM "${col}") = ?`, [Number(month)]);
+      else if (isMy) q = q.whereRaw(`MONTH(\`${col}\`) = ?`, [Number(month)]);
+      else           q = q.whereRaw(`strftime('%m', \`${col}\`) = ?`, [String(month).padStart(2, '0')]);
     }
     return q;
   }

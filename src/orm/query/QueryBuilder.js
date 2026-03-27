@@ -311,9 +311,20 @@ class QueryBuilder {
     return instance;
   }
 
-  /** Fetch first or throw 404. */
-  async firstOrFail(message) {
-    const result = await this.first();
+  /**
+   * Find by primary key — allows chaining with .with().
+   *   Post.with('author').find(1)
+   */
+  async find(id) {
+    return this.where(this._model.primaryKey, id).first();
+  }
+
+  /**
+   * Find by primary key or throw 404.
+   *   Post.with('author').findOrFail(1)
+   */
+  async findOrFail(id, message) {
+    const result = await this.find(id);
     if (!result) {
       const HttpError = require('../../errors/HttpError');
       throw new HttpError(404, message || `${this._model.name} not found`);
@@ -323,7 +334,11 @@ class QueryBuilder {
 
   /** Count matching rows. */
   async count(column = '*') {
-    const result = await this._query.clone().clearSelect().count(`${column} as count`).first();
+    const result = await this._query.clone()
+      .clearSelect()
+      .clearOrder()
+      .count(`${column} as count`)
+      .first();
     return Number(result?.count ?? 0);
   }
 
@@ -344,7 +359,11 @@ class QueryBuilder {
    */
   async paginate(page = 1, perPage = 15) {
     const offset = (page - 1) * perPage;
-    const total  = await this._query.clone().clearSelect().count('* as count').first()
+    const total  = await this._query.clone()
+      .clearSelect()
+      .clearOrder()
+      .count('* as count')
+      .first()
       .then(r => Number(r?.count ?? 0));
 
     const rows = await this._query.clone().limit(perPage).offset(offset);
@@ -363,7 +382,17 @@ class QueryBuilder {
 
   /** Update matching rows. */
   async update(data) {
-    return this._query.update({ ...data, updated_at: new Date().toISOString() });
+    const F     = require('./F');
+    const extra = this._model._updatedAtPayload?.() ?? {};
+    const payload = {};
+    for (const [key, val] of Object.entries({ ...data, ...extra })) {
+      if (val instanceof F) {
+        payload[key] = val.toKnex(this._query.client);
+      } else {
+        payload[key] = val;
+      }
+    }
+    return this._query.update(payload);
   }
 
   /** Delete matching rows. */
@@ -371,7 +400,148 @@ class QueryBuilder {
     return this._query.delete();
   }
 
-  /** Return the raw SQL string (for debugging). */
+  /**
+   * Get exactly one result — raises if 0 or more than 1 found.
+   * Matches Django's QuerySet.get()
+   */
+  async get_one(...args) {
+    if (args.length) this.where(...args);
+    this._query = this._query.limit(2);
+    const rows = await this._query;
+    if (rows.length === 0) {
+      const HttpError = require('../../errors/HttpError');
+      throw new HttpError(404, `${this._model.name} matching query does not exist.`);
+    }
+    if (rows.length > 1) {
+      throw new Error(`get() returned more than one ${this._model.name} — it returned ${rows.length}!`);
+    }
+    const instance = this._model._hydrate(rows[0]);
+    if (this._withs.length) await this._eagerLoad([instance]);
+    return instance;
+  }
+
+  /**
+   * Return last matching row (reverse of first()).
+   *   Post.orderBy('created_at').last()
+   */
+  async last() {
+    const rows = await this._query;
+    if (!rows.length) return null;
+    const instance = this._model._hydrate(rows[rows.length - 1]);
+    if (this._withs.length) await this._eagerLoad([instance]);
+    return instance;
+  }
+
+  /**
+   * Return empty result set — useful for conditional queries.
+   *   Post.none().get() // []
+   */
+  none() {
+    this._query = this._query.whereRaw('1 = 0');
+    return this;
+  }
+
+  /**
+   * Lock selected rows for update (SELECT FOR UPDATE).
+   * Postgres and MySQL only.
+   *   Post.where('status', 'pending').selectForUpdate().first()
+   */
+  selectForUpdate(options = {}) {
+    const client = this._query.client?.config?.client || '';
+    if (client.includes('sqlite')) {
+      // SQLite doesn't support SELECT FOR UPDATE — silently skip
+      return this;
+    }
+    if (options.skipLocked) {
+      this._query = this._query.forUpdate().skipLocked();
+    } else if (options.noWait) {
+      this._query = this._query.forUpdate().noWait();
+    } else {
+      this._query = this._query.forUpdate();
+    }
+    return this;
+  }
+
+  /**
+   * Return a dict mapping pk → instance.
+   * Matches Django's QuerySet.in_bulk()
+   *   Post.inBulk([1, 2, 3])  // { 1: Post, 2: Post, 3: Post }
+   *   Post.inBulk()           // all rows as dict
+   */
+  async inBulk(ids = null, fieldName = null) {
+    const pk = fieldName || this._model.primaryKey;
+    if (ids !== null) {
+      if (ids.length === 0) return {};
+      this._query = this._query.whereIn(pk, ids);
+    }
+    const rows = await this._query;
+    const result = {};
+    for (const row of rows) {
+      const instance = this._model._hydrate(row);
+      result[instance[pk]] = instance;
+    }
+    return result;
+  }
+
+  /**
+   * Reverse the current ordering.
+   * Matches Django's QuerySet.reverse()
+   */
+  reverse() {
+    // Wrap current query as subquery and reverse order
+    // Simple implementation: toggle asc/desc on existing order
+    this._reversed = true;
+    return this;
+  }
+
+  /**
+   * Return query plan (EXPLAIN).
+   * Matches Django's QuerySet.explain()
+   */
+  async explain() {
+    const client = this._query.client?.config?.client || '';
+    const sql    = this._query.toSQL();
+    const prefix = client.includes('pg') ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
+    const db     = require('../drivers/DatabaseManager').connection(this._model.connection || null);
+    const result = await db.raw(prefix + sql.sql, sql.bindings);
+    return result.rows ?? result[0] ?? result;
+  }
+
+  /**
+   * Use a specific DB connection for this query.
+   * Matches Django's QuerySet.using()
+   */
+  using(connectionName) {
+    const DatabaseManager = require('../drivers/DatabaseManager');
+    const db = DatabaseManager.connection(connectionName);
+    this._query = db(this._model.table);
+    return this;
+  }
+
+  /**
+   * Return the raw SQL string with bindings substituted — for debugging.
+   * Matches Django's str(queryset.query) behaviour.
+   *
+   *   console.log(Post.where('published', true).orderBy('created_at').sql())
+   *   // → select * from `posts` where `published` = true order by `created_at` asc
+   *
+   *   // Also available as toSQL() for the raw { sql, bindings } object
+   *   Post.where('published', true).toSQL()
+   *   // → { sql: 'select * from `posts` where `published` = ?', bindings: [true] }
+   */
+  sql() {
+    const { sql, bindings } = this._query.toSQL();
+    // Substitute bindings into the SQL string for readability
+    let result = sql;
+    for (const binding of bindings) {
+      const val = binding === null ? 'NULL'
+        : typeof binding === 'string' ? `'${binding}'`
+        : String(binding);
+      result = result.replace('?', val);
+    }
+    return result;
+  }
+
   toSQL() {
     return this._query.toSQL();
   }

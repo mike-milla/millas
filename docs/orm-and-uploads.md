@@ -9,12 +9,16 @@
 
 1. [Models](#1-models)
 2. [Field Types](#2-field-types)
-3. [Relations](#3-relations)
-4. [Indexes & Unique Constraints](#4-indexes--unique-constraints)
-5. [Type Casting](#5-type-casting)
-6. [Migrations](#6-migrations)
-7. [File Uploads](#7-file-uploads)
-8. [Storage](#8-storage)
+3. [Querying](#3-querying)
+4. [F Expressions](#4-f-expressions)
+5. [Relations](#5-relations)
+6. [Indexes & Unique Constraints](#6-indexes--unique-constraints)
+7. [Type Casting](#7-type-casting)
+8. [Bulk Operations](#8-bulk-operations)
+9. [Migrations](#9-migrations)
+10. [Database Drivers](#10-database-drivers)
+11. [File Uploads](#11-file-uploads)
+12. [Storage](#12-storage)
 
 ---
 
@@ -44,13 +48,32 @@ You do **not** need to declare `fields.id()`. If no primary key is declared, Mil
 
 ```js
 // These two are identical:
-
 class Post extends Model {
   static fields = { title: fields.string() };
 }
 
 class Post extends Model {
   static fields = { id: fields.id(), title: fields.string() };
+}
+```
+
+### Auto timestamps
+
+`created_at` and `updated_at` are only injected if they are declared in `static fields`. If your model doesn't have them, they are never added — no "no such column" errors.
+
+```js
+// No timestamps — nothing injected
+class AdminSetting extends Model {
+  static fields = { key: fields.string(), value: fields.text() };
+}
+
+// Has timestamps — injected on create/update
+class Post extends Model {
+  static fields = {
+    title:      fields.string(),
+    created_at: fields.timestamp(),
+    updated_at: fields.timestamp(),
+  };
 }
 ```
 
@@ -71,7 +94,6 @@ class Post extends Model {
 ```js
 class Post extends Model {
   static softDeletes = true;
-  static fields = { ... };
 }
 
 await post.delete();           // sets deleted_at, row stays in DB
@@ -82,8 +104,6 @@ await post.forceDelete();      // permanently removes the row
 ```
 
 ### Hidden fields
-
-Fields listed in `static hidden` are excluded from `toJSON()` and API responses.
 
 ```js
 class User extends Model {
@@ -106,7 +126,7 @@ class Post extends TimestampedModel {
   static table = 'posts';
   static fields = {
     title: fields.string(),
-    // created_at and updated_at are inherited automatically
+    // created_at and updated_at inherited automatically
   };
 }
 ```
@@ -119,15 +139,12 @@ All models **must** be exported from `app/models/index.js`. This is the single s
 // app/models/index.js
 const { User } = require('./core');
 const { Post } = require('./content');
-
 module.exports = { User, Post };
 ```
 
 ---
 
 ## 2. Field Types
-
-### All available fields
 
 | Field | DB type | Notes |
 |---|---|---|
@@ -151,65 +168,286 @@ module.exports = { User, Post };
 
 ### Common options
 
-All fields accept these options:
-
 ```js
 fields.string({
-  max:      100,       // max length (string types)
-  nullable: true,      // allow NULL
-  unique:   true,      // unique constraint
-  default:  'active',  // default value
-  unsigned: true,      // unsigned (integer types)
+  max:      100,
+  nullable: true,
+  unique:   true,
+  default:  'active',
+  unsigned: true,
 })
-```
-
-### JSON fields
-
-JSON is automatically serialized/deserialized — no manual `JSON.parse` needed:
-
-```js
-class Post extends Model {
-  static fields = {
-    tags:     fields.json({ nullable: true }),
-    metadata: fields.json({ default: '{}' }),
-  };
-}
-
-const post = await Post.find(1);
-console.log(post.tags);   // already an array/object, not a string
-
-await Post.create({ tags: ['news', 'tech'] });  // auto JSON.stringify
-await post.update({ tags: ['news'] });           // auto JSON.stringify
-// post.tags is still ['news'] after update — not a string
 ```
 
 ---
 
-## 3. Relations
+## 3. Querying
 
-### ForeignKey (BelongsTo)
+### Basic CRUD
+
+```js
+// Create
+const post = await Post.create({ title: 'Hello' });
+
+// Find by PK
+const post = await Post.find(1);           // null if not found
+const post = await Post.findOrFail(1);     // throws 404 if not found
+
+// Find by field
+const user = await User.findBy('email', 'alice@example.com');
+
+// Get exactly one — throws if 0 or >1 results (Django's .get())
+const user = await User.get({ email: 'alice@example.com' });
+
+// All
+const posts = await Post.all();
+
+// Update instance
+await post.update({ title: 'New Title' });
+await post.save();   // saves only dirty fields
+
+// Delete
+await post.delete();
+```
+
+### Filtering
+
+```js
+Post.where('published', true).get()
+Post.where('views__gte', 100).get()
+Post.where('title__icontains', 'hello').get()
+Post.filter('status', 'active').get()       // alias for where()
+Post.exclude('status', 'banned').get()      // whereNot()
+```
+
+### Django-style lookups
+
+| Lookup | SQL |
+|---|---|
+| `field__exact` | `= value` |
+| `field__not` | `!= value` |
+| `field__gt` / `__gte` / `__lt` / `__lte` | `>` / `>=` / `<` / `<=` |
+| `field__in` | `IN (...)` |
+| `field__notin` | `NOT IN (...)` |
+| `field__between` | `BETWEEN [a, b]` |
+| `field__isnull` | `IS NULL` / `IS NOT NULL` |
+| `field__contains` | `LIKE %val%` |
+| `field__icontains` | Case-insensitive contains (dialect-aware) |
+| `field__startswith` / `__endswith` | `LIKE val%` / `LIKE %val` |
+| `field__istartswith` / `__iendswith` | Case-insensitive (dialect-aware) |
+| `field__regex` | Regex match (PG: `~`, MySQL: `REGEXP`) |
+| `field__iregex` | Case-insensitive regex |
+| `field__year` / `__month` / `__day` | Date part extraction |
+| `field__hour` / `__minute` / `__second` | Time part extraction |
+| `field__date` / `__time` | Date/time cast |
+| `field__week` / `__week_day` / `__quarter` | Week/quarter extraction |
+
+> All case-insensitive lookups are dialect-aware: `ILIKE` on PostgreSQL, `LOWER() LIKE` on SQLite/MySQL.
+
+### Chaining
+
+```js
+Post
+  .where('published', true)
+  .where('views__gte', 100)
+  .orderBy('created_at', 'desc')
+  .limit(10)
+  .offset(20)
+  .get()
+```
+
+### get() — raises on 0 or multiple results
+
+```js
+// Matches Django's Model.objects.get()
+const user = await User.get({ email: 'alice@example.com' });
+// throws 404 if not found
+// throws Error if more than one found
+```
+
+### first() / last() / none()
+
+```js
+await Post.orderBy('created_at').first()   // first row or null
+await Post.orderBy('created_at').last()    // last row or null
+await Post.none().get()                    // always []
+```
+
+### Aggregates
+
+```js
+await Post.count()
+await Post.where('published', true).count()
+
+const { total, avg } = await Order.aggregate({
+  total: Sum('amount'),
+  avg:   Avg('amount'),
+});
+```
+
+### Pagination
+
+```js
+const { data, total, page, perPage, lastPage } = await Post
+  .where('published', true)
+  .orderBy('created_at', 'desc')
+  .paginate(1, 20);
+```
+
+### values() / valuesList() / pluck()
+
+```js
+await Post.values('id', 'title').get()       // [{ id, title }, ...]
+await Post.valuesList('title').get()         // ['Title 1', 'Title 2', ...]
+await Post.where('published', true).pluck('id')  // [1, 2, 3]
+```
+
+### inBulk() — dict of pk → instance
+
+```js
+// Matches Django's QuerySet.in_bulk()
+const map = await Post.inBulk([1, 2, 3]);
+map[1].title;
+
+// All rows as dict
+const all = await Post.inBulk();
+
+// By a different field
+const byEmail = await User.inBulk(['a@b.com', 'c@d.com'], 'email');
+```
+
+### selectForUpdate() — row locking
+
+```js
+// Matches Django's QuerySet.select_for_update()
+// PostgreSQL and MySQL only — silently skipped on SQLite
+
+await Post.transaction(async (trx) => {
+  const post = await Post.where('id', 1).selectForUpdate().first();
+  await post.update({ stock: F('stock').subtract(1) });
+});
+
+// Options
+Post.where('id', 1).selectForUpdate({ noWait: true })
+Post.where('id', 1).selectForUpdate({ skipLocked: true })
+```
+
+### explain() — query plan
+
+```js
+const plan = await Post.where('published', true).explain();
+```
+
+### using() — specific DB connection
+
+```js
+await Post.using('replica').where('published', true).get();
+```
+
+### Raw queries
+
+```js
+Post.whereRaw('YEAR(created_at) = ?', [2024]).get()
+Post.selectRaw('COUNT(*) as total').get()
+Post.raw('SELECT * FROM posts WHERE views > ?', [100])
+```
+
+### Q objects — complex boolean logic
+
+```js
+const { Q } = require('millas/core/db');
+
+// OR
+User.filter(Q({ role: 'admin' }).or({ role: 'moderator' })).get()
+
+// AND + OR nested
+Post.filter(
+  Q({ published: true }).and(
+    Q({ views__gte: 100 }).or({ featured: true })
+  )
+).get()
+
+// NOT
+User.filter(Q({ status: 'banned' }).not()).get()
+```
+
+### increment() / decrement()
+
+```js
+await post.increment('views_count');       // +1
+await post.increment('views_count', 5);    // +5
+await post.decrement('stock', 1);          // -1
+```
+
+---
+
+## 4. F Expressions
+
+`F()` lets you reference column values in queries without fetching them first — enabling atomic operations and column comparisons.
+
+```js
+const { F } = require('millas/core/db');
+```
+
+### Atomic updates — no race conditions
+
+```js
+// Atomic increment
+await Post.where('id', 1).update({ views: F('views').add(1) });
+
+// Arithmetic
+await Product.where('id', 1).update({
+  price: F('price').multiply(1.1),   // 10% increase
+  stock: F('stock').subtract(qty),   // reduce stock
+});
+```
+
+### Column arithmetic
+
+```js
+F('price').add(10)
+F('price').subtract(5)
+F('price').multiply(1.2)
+F('price').divide(2)
+```
+
+### Ordering by expression
+
+```js
+await Post.orderByRaw('views + likes DESC').get()
+```
+
+---
+
+## 5. Relations
+
+### ForeignKey (BelongsTo) — forward
 
 ```js
 class Post extends Model {
-  static table = 'posts';
   static fields = {
-    // Field named 'author' → DB column 'author_id', accessor post.author()
     author: fields.ForeignKey('User', {
-      onDelete:    'CASCADE',   // CASCADE | SET NULL | RESTRICT (default: CASCADE)
+      onDelete:    'CASCADE',
       nullable:    false,
-      relatedName: 'posts',     // reverse: user.posts()
+      relatedName: 'posts',   // enables user.posts eager load
     }),
   };
 }
-
-// Eager load
-const post = await Post.with('author').find(1);
-post.author.name;
-
-// Lazy load
-const post  = await Post.find(1);
-const author = await post.author();
 ```
+
+### Reverse relations — automatic (like Django)
+
+When `relatedName` is set on a `ForeignKey`, the reverse relation is **automatically wired** on the target model. No `static relations` block needed.
+
+```js
+// UnitCategory declares:
+//   property: fields.ForeignKey('Property', { relatedName: 'unit_categories' })
+
+// This works automatically on Property — no extra code needed:
+const property = await Property.with('unit_categories').find(1);
+property.unit_categories;  // array of UnitCategory instances
+```
+
+Use `'+'` as `relatedName` to suppress the reverse relation (same as Django).
 
 ### OneToOne
 
@@ -217,9 +455,9 @@ const author = await post.author();
 class Profile extends Model {
   static fields = {
     user: fields.OneToOne('User', { relatedName: 'profile' }),
-    bio:  fields.text(),
   };
 }
+// user.profile works automatically
 ```
 
 ### ManyToMany
@@ -227,10 +465,7 @@ class Profile extends Model {
 ```js
 class Post extends Model {
   static fields = {
-    tags: fields.ManyToMany('Tag', {
-      through:     'post_tags',   // optional custom pivot table
-      relatedName: 'posts',
-    }),
+    tags: fields.ManyToMany('Tag', { through: 'post_tags', relatedName: 'posts' }),
   };
 }
 
@@ -239,96 +474,59 @@ await post.tags.detach(tagId);
 await post.tags.sync([1, 2, 3]);
 ```
 
-### String model references
-
-When using a string model name like `'User'`, Millas resolves it from `app/models/index.js`. The model **must** be exported there.
-
-```js
-// Works — User is exported from app/models/index.js
-fields.ForeignKey('User', { ... })
-
-// Also works — direct lazy class reference
-const User = require('../core/User');
-fields.ForeignKey(() => User, { ... })
-```
-
 ### Eager loading
 
 ```js
 Post.with('author').get()
 Post.with('author', 'tags').get()
 Post.with({ author: q => q.where('active', true) }).get()  // constrained
-Post.withCount('comments').get()   // adds .comments_count to each instance
-Post.withSum('orders', 'amount').get()  // adds .orders_sum_amount
+Post.with('author').find(1)          // chained with find()
+Post.with('author').findOrFail(1)    // chained with findOrFail()
+Post.withCount('comments').get()     // adds .comments_count
+Post.withSum('orders', 'amount').get() // adds .orders_sum_amount
+```
+
+### Lazy loading
+
+```js
+const post   = await Post.find(1);
+const author = await post.author();         // BelongsTo
+const tags   = await post.tags();           // ManyToMany
+const units  = await property.unit_categories(); // HasMany (auto-wired)
 ```
 
 ---
 
-## 4. Indexes & Unique Constraints
-
-### Declaring indexes
+## 6. Indexes & Unique Constraints
 
 ```js
 class MarketplacePost extends Model {
-  static table = 'marketplace_posts';
-
-  static fields = {
-    user:      fields.ForeignKey('User', { ... }),
-    category:  fields.string({ max: 100 }),
-    location:  fields.string({ max: 255 }),
-    is_active: fields.boolean({ default: true }),
-    created_at: fields.timestamp(),
-  };
-
   static indexes = [
-    { fields: ['category'] },                                           // simple
-    { fields: ['created_at', 'is_active'] },                           // composite
-    { fields: ['created_at', 'is_active'], name: 'active_posts_idx' }, // named
-    { fields: ['location'], unique: true },                             // unique index
+    { fields: ['category'] },
+    { fields: ['created_at', 'is_active'], name: 'active_posts_idx' },
+    { fields: ['location'], unique: true },
+    { fields: ['-created_at'] },   // descending index
   ];
 
   static uniqueTogether = [
-    ['user_id', 'category'],   // composite unique constraint
+    ['user_id', 'category'],
   ];
 }
 ```
 
-### How it works
-
-- `makemigrations` detects changes to `static indexes` and `static uniqueTogether`
-- Generates `AddIndex`, `RemoveIndex`, or `AlterUniqueTogether` operations automatically
-- `migrate` applies them via knex `t.index()` / `t.unique()`
-- `migrate:rollback` drops them cleanly
-
-### Generated migration example
-
-```js
-migrations.AddIndex({
-  modelName: 'marketplace_posts',
-  index: { fields: ['created_at', 'is_active'], name: 'active_posts_idx' },
-}),
-
-migrations.AlterUniqueTogether({
-  modelName: 'marketplace_posts',
-  newUnique: [['user_id', 'category']],
-  oldUnique: [],
-}),
-```
-
-> Single-field `unique: true` on a field definition still works as before.
-> `static indexes` is for composite or named indexes.
+- `makemigrations` detects changes and generates `AddIndex` / `RemoveIndex` / `RenameIndex` / `AlterUniqueTogether`
+- Renaming an index (same fields, different name) generates `RenameIndex` — no data loss
+- `migrate` applies them, `migrate:rollback` drops them
 
 ---
 
-## 5. Type Casting
-
-Millas automatically casts values when reading from and writing to the database.
+## 7. Type Casting
 
 ### On read
 
-| Field type | Cast applied |
+| Type | Cast |
 |---|---|
-| `boolean` | `Boolean(val)` — SQLite stores 0/1 |
+| `boolean` | `Boolean(val)` |
 | `integer` / `bigInteger` | `parseInt` |
 | `float` / `decimal` | `parseFloat` |
 | `json` | `JSON.parse(val)` |
@@ -337,241 +535,208 @@ Millas automatically casts values when reading from and writing to the database.
 
 ### On write
 
-| Field type | Serialized as |
+| Type | Serialized as |
 |---|---|
 | `json` | `JSON.stringify(val)` |
-| `boolean` | `1` / `0` (SQLite/MySQL compatible) |
-| `date` / `timestamp` | `.toISOString()` if a `Date` object is passed |
-
-### Instance integrity after update
-
-After `post.update({ tags: ['a', 'b'] })`, the in-memory instance keeps the JS array — not the serialized string. Serialization only happens for the DB write.
+| `boolean` | `1` / `0` |
+| `date` / `timestamp` | `.toISOString()` if `Date` object |
 
 ---
 
-## 6. Migrations
+## 8. Bulk Operations
+
+### bulkCreate()
+
+```js
+// Basic
+await UnitCategory.bulkCreate([
+  { property_id: 1, unit_type: '2 Bedroom', rent_amount: 15000 },
+  { property_id: 1, unit_type: 'Bedsitter', rent_amount: 8000 },
+]);
+
+// Ignore duplicates (INSERT OR IGNORE)
+await Post.bulkCreate(rows, { ignoreConflicts: true });
+
+// Upsert — update on conflict
+await User.bulkCreate(rows, {
+  updateConflicts: true,
+  uniqueFields:    ['email'],
+  updateFields:    ['name', 'updated_at'],
+});
+```
+
+### bulkUpdate()
+
+```js
+await Post.bulkUpdate([
+  { id: 1, title: 'One', published: true },
+  { id: 2, title: 'Two', published: false },
+], 'id');
+```
+
+### bulkDelete()
+
+```js
+await Post.bulkDelete([1, 2, 3]);
+```
+
+### insert() — raw, no hooks
+
+```js
+// Low-level, no beforeCreate hooks, no return of instances
+await Post.insert([
+  { title: 'One', created_at: new Date() },
+  { title: 'Two', created_at: new Date() },
+]);
+```
+
+---
+
+## 9. Migrations
 
 ### Commands
 
 ```bash
-millas makemigrations    # detect model changes, generate migration files
-millas migrate           # apply pending migrations
-millas migrate:rollback  # roll back last batch
-millas migrate:fresh     # drop all tables and re-migrate
-millas migrate:status    # show applied/pending migrations
-millas migrate:reset     # roll back all migrations
-millas migrate:refresh   # reset + migrate
+millas makemigrations          # detect changes, generate files
+millas makemigrations --noinput  # CI mode — throws on dangerous ops
+millas migrate                 # apply pending
+millas migrate --fake app:0001_initial  # mark as applied without running
+millas migrate:rollback        # roll back last batch
+millas migrate:rollback --steps 3
+millas migrate:fresh           # drop all + re-migrate
+millas migrate:status          # show applied/pending
+millas migrate:reset           # roll back all
+millas migrate:refresh         # reset + migrate
+millas migrate:plan            # preview what would run
 ```
 
 ### Non-nullable field without default
 
-When adding a non-nullable field to an existing table, `makemigrations` prompts:
-
 ```
-It is impossible to add a non-nullable field 'phone' to the
-'users' table without specifying a default. This is because the
-database needs something to populate existing rows.
+It is impossible to add a non-nullable field 'phone' to the 'users' table.
 
-Please select a fix:
  1) Provide a one-off default now (used only for existing rows)
  2) Quit and make 'phone' nullable in your model (recommended)
  3) Quit and add a permanent default to your model
 ```
 
-One-off defaults support literals and callables:
-
+One-off defaults:
 ```
-Enter default for 'phone': ''                  # empty string literal
-Enter default for 'uuid': crypto.randomUUID    # called once per row at migrate time
-Enter default for 'joined_at': Date.now        # called once per row at migrate time
+Enter default for 'uuid': crypto.randomUUID    # per-row callable
+Enter default for 'joined_at': Date.now        # per-row callable
+Enter default for 'status': 'active'           # literal
 ```
 
 ### Rename detection
-
-When a field is removed and another of the same type is added on the same table, `makemigrations` asks:
 
 ```
 Was users.phone_number renamed to users.mobile? (a CharField) [y/N]
 ```
 
-- `y` → single `RenameField` op — no data loss
-- `n` → `RemoveField` + `AddField` — data in the old column is lost
-
 ### Destructive type change warning
 
-Changing a field type in a way that could lose data prints a warning during `makemigrations`:
-
 ```
-⚠  Warning: changing 'posts.views' from string to integer may cause
-   data loss. Existing data cannot be automatically converted.
+⚠  Warning: changing 'posts.views' from string to integer may cause data loss.
 ```
 
-Safe changes within the same family do **not** warn:
+Safe families (no warning):
 - `string` ↔ `text` ↔ `email` ↔ `url` ↔ `slug` ↔ `ipAddress`
 - `integer` ↔ `bigInteger` ↔ `float` ↔ `decimal`
 
-### Non-interactive mode (CI)
+---
+
+## 10. Database Drivers
+
+### Switching databases
+
+Change `.env` and restart:
 
 ```bash
-millas makemigrations --noinput
+DB_CONNECTION=postgres   # or sqlite, mysql
+DB_HOST=localhost
+DB_PORT=5432
+DB_DATABASE=mydb
+DB_USERNAME=user
+DB_PASSWORD=pass
 ```
 
-Throws with a clear error if any dangerous ops are detected instead of prompting.
+Install the driver:
 
-### Migration file format
-
-```js
-// Generated by Millas 1.0.0 on 2026-03-26 10:00
-const { migrations, fields } = require('millas/core/db');
-
-module.exports = class Migration {
-  static dependencies = [
-    ['system', '0001_users'],
-  ];
-
-  static initial = true;
-
-  static operations = [
-    migrations.CreateModel({
-      name: 'posts',
-      fields: [
-        ['id',         fields.id()],
-        ['title',      fields.string({ max: 255 })],
-        ['author_id',  fields.ForeignKey('users', { onDelete: 'CASCADE' })],
-        ['created_at', fields.timestamp({ nullable: true })],
-      ],
-    }),
-  ];
-};
+```bash
+npm install pg       # PostgreSQL
+npm install mysql2   # MySQL
+# SQLite is built-in via better-sqlite3
 ```
+
+### Driver differences handled automatically
+
+| Feature | SQLite | MySQL | PostgreSQL |
+|---|---|---|---|
+| `icontains` | `LOWER() LIKE` | `LOWER() LIKE` | `ILIKE` |
+| `insert()` return | `[lastId]` | `[{ insertId }]` | `.returning(pk)` |
+| `bulkCreate()` return | re-fetch by ID range | re-fetch by ID range | `RETURNING *` |
+| `selectForUpdate()` | silently skipped | supported | supported |
+| `regex` lookup | warn + fallback | `REGEXP` | `~` |
 
 ---
 
-## 7. File Uploads
+## 11. File Uploads
 
 ### Requirements
 
 ```bash
 npm install multer   # required
-npm install sharp    # optional — for image dimensions/metadata
+npm install sharp    # optional — image dimensions/metadata
 ```
 
 ### Route setup
 
-Millas auto-injects multer when a route has `encoding: 'multipart'` or a `file()` validator in its shape. No manual multer setup needed.
-
 ```js
 const { file } = require('millas/core/validation');
 
-Route.post('/media/upload', MediaController, 'upload')
+Route.post('/upload', MediaController, 'upload')
   .shape({
     encoding: 'multipart',
-    in: {
-      file: file().required().maxSize('50mb'),
-    },
+    in: { file: file().required().maxSize('50mb') },
   });
+
+// Or middleware alias
+Route.post('/upload',  ['auth', 'upload'],          MediaController, 'upload');
+Route.post('/avatar',  ['auth', 'upload:avatar'],   UserController,  'avatar');
+Route.post('/photos',  ['auth', 'upload:photos,5'], GalleryController, 'store');
 ```
 
-Or use the `upload` middleware alias:
-
-```js
-Route.post('/upload',  ['auth', 'upload'],          MediaController, 'upload');   // any field
-Route.post('/avatar',  ['auth', 'upload:avatar'],   UserController,  'avatar');   // named field
-Route.post('/photos',  ['auth', 'upload:photos,5'], GalleryController, 'store');  // up to 5 files
-```
-
-### Controller — single file
+### Controller
 
 ```js
 async upload({ file, user }) {
   if (!file) return badRequest('No file uploaded');
 
-  // Type checks
   file.isImage()                              // true/false
   file.isVideo()                              // true/false
-  file.isAudio()                              // true/false
-  file.isPdf()                                // true/false
   file.hasMimeType('image/jpeg', 'image/png') // true/false
-
-  // Metadata
   file.mimeType      // 'image/jpeg'
   file.size          // bytes
   file.humanSize()   // '1.2 MB'
   file.extension()   // 'jpg'
   file.originalName  // 'photo.jpg'
-  file.fieldName     // 'file'
 
-  // Store — returns stored relative path
   const path = await file.store('avatars');
-  // → 'avatars/1714000000_a3f9bc.jpg'
-
-  // Store with explicit filename
   const path = await file.storeAs('avatars', `${user.id}.jpg`);
-
-  // Store to specific disk
   const path = await file.store('avatars', { disk: 'public' });
+  const url  = Storage.url(path);
 
-  // Public URL
-  const url = Storage.url(path);   // '/storage/avatars/...'
-
-  // Image dimensions (requires sharp)
-  const { width, height } = await file.dimensions();
-
-  // Raw buffer
-  const buffer = await file.read();
-
-  // Base64 data URI
+  const { width, height } = await file.dimensions();  // requires sharp
+  const buffer  = await file.read();
   const dataUri = file.toDataUri();
-
-  return success({ path, url });
-}
-```
-
-### Controller — multiple files
-
-```js
-async upload({ files }) {
-  // files is keyed by field name
-  for (const photo of files.photos) {
-    await photo.store('gallery');
-  }
-}
-```
-
-### Image processing with sharp
-
-```js
-async upload({ file, user }) {
-  const buffer = await file.read();
-
-  const variants = [
-    { name: 'blur',     width: 32,   blur: 20, quality: 20 },
-    { name: 'small',    width: 320,             quality: 80 },
-    { name: 'original', width: null,            quality: 90 },
-  ];
-
-  const urls = {};
-  await Promise.all(variants.map(async (v) => {
-    let pipeline = sharp(buffer);
-    if (v.width) pipeline = pipeline.resize(v.width, null, { withoutEnlargement: true });
-    if (v.blur)  pipeline = pipeline.blur(v.blur);
-    pipeline = pipeline.jpeg({ quality: v.quality });
-
-    const buf  = await pipeline.toBuffer();
-    const key  = `media/${mediaId}/${v.name}.jpg`;
-    await Storage.put(key, buf);
-    urls[v.name] = Storage.url(key);
-  }));
 }
 ```
 
 ---
 
-## 8. Storage
+## 12. Storage
 
-### Zero config
-
-`StorageServiceProvider` is auto-registered on every boot. No setup needed.
+### Zero config — auto-registered on every boot
 
 ```js
 const Storage = require('millas/facades/Storage');
@@ -580,76 +745,39 @@ await Storage.put('avatars/alice.jpg', buffer);
 const buffer = await Storage.get('avatars/alice.jpg');
 const exists = await Storage.exists('avatars/alice.jpg');
 await Storage.delete('avatars/alice.jpg');
-const url    = Storage.url('avatars/alice.jpg');  // '/storage/avatars/alice.jpg'
+const url = Storage.url('avatars/alice.jpg');  // '/storage/avatars/alice.jpg'
 ```
 
-### Static file serving
+### Static file serving — automatic
 
-Uploaded files are served automatically at their `baseUrl`. No `storage:link` or manual Express setup needed.
-
-Default disks:
-- `local`  → saves to `storage/uploads/`, served at `/storage/*`
-- `public` → saves to `public/storage/`, served at `/storage/*`
+Files are served at their `baseUrl` with no setup needed:
+- `local`  → `storage/uploads/` → `/storage/*`
+- `public` → `public/storage/`  → `/storage/*`
 
 ### Multiple disks
 
 ```js
 await Storage.disk('public').put('images/logo.png', buffer);
-const url = Storage.disk('public').url('images/logo.png');
-```
-
-### Custom config (`config/storage.js`)
-
-```js
-module.exports = {
-  default: 'local',
-  disks: {
-    local: {
-      driver:  'local',
-      root:    'storage/uploads',
-      baseUrl: '/storage',
-    },
-    public: {
-      driver:  'local',
-      root:    'public/storage',
-      baseUrl: '/storage',
-    },
-  },
-};
-```
-
-### Storing uploads
-
-```js
-// From UploadedFile instance (recommended — use inside controllers)
-const path = await file.store('avatars');
-const path = await file.storeAs('avatars', `${user.id}.jpg`);
-
-// From raw multer file object
-const path = await Storage.putFile('avatars', req.file);
-
-// From base64 data URI
-const path = await Storage.putDataUri('avatars', 'data:image/png;base64,...');
 ```
 
 ### Full API
 
 ```js
-Storage.put(path, content)                    // write file
-Storage.get(path)                             // read as Buffer
-Storage.getString(path)                       // read as UTF-8 string
-Storage.exists(path)                          // boolean
-Storage.delete(path)                          // delete file
-Storage.deleteDirectory(dir)                  // delete directory recursively
-Storage.copy(from, to)                        // copy file
-Storage.move(from, to)                        // move/rename file
-Storage.files(dir)                            // list files in directory
-Storage.allFiles(dir)                         // list files recursively
-Storage.directories(dir)                      // list subdirectories
-Storage.makeDirectory(dir)                    // create directory
-Storage.metadata(path)                        // { path, size, mimeType, lastModified }
-Storage.url(path)                             // public URL
-Storage.path(path)                            // absolute filesystem path
-Storage.stream(path, res)                     // stream to Express response
-Storage.stream(path, res, { download: true }) // force download
+Storage.put(path, content)
+Storage.get(path)                    // Buffer
+Storage.getString(path)              // UTF-8 string
+Storage.exists(path)                 // boolean
+Storage.delete(path)
+Storage.deleteDirectory(dir)
+Storage.copy(from, to)
+Storage.move(from, to)
+Storage.files(dir)                   // list files
+Storage.allFiles(dir)                // recursive
+Storage.directories(dir)
+Storage.makeDirectory(dir)
+Storage.metadata(path)               // { path, size, mimeType, lastModified }
+Storage.url(path)                    // public URL
+Storage.path(path)                   // absolute filesystem path
+Storage.stream(path, res)
+Storage.stream(path, res, { download: true })
 ```

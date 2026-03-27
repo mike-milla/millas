@@ -53,7 +53,7 @@ class AddField extends BaseOperation {
       await this._safeBackfill(db, def);
     } else {
       await db.schema.table(this.table, (t) => {
-        applyColumn(t, this.column, def);
+        applyColumn(t, this.column, def, this.table);
       });
     }
   }
@@ -94,7 +94,7 @@ class AddField extends BaseOperation {
 
     // Step 1: add as nullable
     await db.schema.table(this.table, (t) => {
-      applyColumn(t, this.column, { ...def, nullable: true, default: null });
+      applyColumn(t, this.column, { ...def, nullable: true, default: null }, this.table);
     });
 
     // Step 2: backfill
@@ -115,7 +115,7 @@ class AddField extends BaseOperation {
 
     // Step 3: tighten to NOT NULL
     await db.schema.alterTable(this.table, (t) => {
-      alterColumn(t, this.column, { ...def, nullable: false });
+      alterColumn(t, this.column, { ...def, nullable: false }, this.table);
     });
   }
 }
@@ -148,7 +148,7 @@ class RemoveField extends BaseOperation {
 
   async down(db) {
     await db.schema.table(this.table, (t) => {
-      applyColumn(t, this.column, normaliseField(this.field));
+      applyColumn(t, this.column, normaliseField(this.field), this.table);
     });
   }
 
@@ -186,13 +186,13 @@ class AlterField extends BaseOperation {
 
   async up(db) {
     await db.schema.alterTable(this.table, (t) => {
-      alterColumn(t, this.column, normaliseField(this.field));
+      alterColumn(t, this.column, normaliseField(this.field), this.table);
     });
   }
 
   async down(db) {
     await db.schema.alterTable(this.table, (t) => {
-      alterColumn(t, this.column, normaliseField(this.previousField));
+      alterColumn(t, this.column, normaliseField(this.previousField), this.table);
     });
   }
 

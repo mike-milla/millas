@@ -189,6 +189,14 @@ class Model {
       merged = { id: fields.id(), ...merged };
     }
 
+    // Auto-inject created_at/updated_at type info when timestamps = true
+    // so _castValue can correctly cast them even if not declared in static fields
+    if (this.timestamps) {
+      const { fields } = require('../fields/index');
+      if (!merged.created_at) merged.created_at = fields.timestamp({ nullable: true });
+      if (!merged.updated_at) merged.updated_at = fields.timestamp({ nullable: true });
+    }
+
     Object.defineProperty(this, '_cachedFields', {
       value: merged, writable: true, configurable: true, enumerable: false,
     });
@@ -293,14 +301,14 @@ class Model {
     const now     = new Date().toISOString();
     let payload   = {
       ...this._applyDefaults(data),
-      ...(this.timestamps ? { created_at: now, updated_at: now } : {}),
+      ...this._timestampPayload(data),
     };
 
     payload = await this.beforeCreate(payload) ?? payload;
     payload = this._serializeForDb(payload);
 
-    const q     = trx ? trx(this.table) : this._db();
-    const [id]  = await q.insert(payload);
+    const q        = trx ? trx(this.table) : this._db();
+    const id       = await this._insert(q, payload);
     const instance = await (trx
       ? this._hydrateFromTrx(id, trx)
       : this.find(id));
@@ -336,12 +344,19 @@ class Model {
   }
 
   static async insert(rows) {
-    const now     = new Date().toISOString();
+    if (!rows || rows.length === 0) return;
     const payload = rows.map(r => ({
       ...this._applyDefaults(r),
-      ...(this.timestamps ? { created_at: now, updated_at: now } : {}),
+      ...this._timestampPayload(r),
+      ...this._serializeForDb(r),
     }));
-    return this._db().insert(payload);
+    const q      = this._db();
+    const client = q.client?.config?.client || '';
+    // Postgres requires .returning() to avoid errors on some configurations
+    if (client.includes('pg')) {
+      return q.insert(payload).returning(this.primaryKey);
+    }
+    return q.insert(payload);
   }
 
   static async destroy(...ids) {
@@ -397,12 +412,78 @@ class Model {
       for (const row of rows) {
         const { [pk]: keyValue, ...data } = row;
         if (keyValue == null) continue;
-        const now = new Date().toISOString();
         await trx(this.table)
           .where(pk, keyValue)
-          .update({ ...data, ...(this.timestamps ? { updated_at: now } : {}) });
+          .update({ ...this._serializeForDb(data), ...this._updatedAtPayload() });
       }
     });
+  }
+
+  /**
+   * Insert many rows at once in a single query.
+   * Applies defaults, timestamps, beforeCreate hook, and serialization.
+   * Returns array of created instances.
+   *
+   *   await Post.bulkCreate([
+   *     { title: 'One', body: 'Hello' },
+   *     { title: 'Two', body: 'World' },
+   *   ]);
+   */
+  static async bulkCreate(rows, { trx, ignoreConflicts = false, updateConflicts = false, updateFields = [], uniqueFields = [] } = {}) {
+    if (!rows || rows.length === 0) return [];
+    let payload = rows.map(row => ({
+      ...this._applyDefaults(row),
+      ...this._timestampPayload(row),
+    }));
+    payload = await Promise.all(payload.map(row => this.beforeCreate(row).then(r => r ?? row)));
+    payload = payload.map(row => this._serializeForDb(row));
+    const q      = trx ? trx(this.table) : this._db();
+    const client = q.client?.config?.client || '';
+
+    if (client.includes('pg')) {
+      let qInsert = q.insert(payload);
+      if (ignoreConflicts) {
+        qInsert = qInsert.onConflict().ignore();
+      } else if (updateConflicts && updateFields.length) {
+        const conflictTarget = uniqueFields.length ? uniqueFields : undefined;
+        qInsert = conflictTarget
+          ? qInsert.onConflict(conflictTarget).merge(updateFields)
+          : qInsert.onConflict().merge(updateFields);
+      }
+      const result = await qInsert.returning('*');
+      return result.map(r => this._hydrate(r));
+    }
+
+    // SQLite / MySQL
+    let qInsert = q.insert(payload);
+    if (ignoreConflicts) {
+      qInsert = qInsert.onConflict().ignore();
+    } else if (updateConflicts && updateFields.length) {
+      qInsert = uniqueFields.length
+        ? qInsert.onConflict(uniqueFields).merge(updateFields)
+        : qInsert.onConflict().merge(updateFields);
+    }
+    const ids     = await qInsert;
+    const firstId = Array.isArray(ids) ? ids[0] : (ids?.insertId ?? ids);
+    if (firstId) {
+      const inserted = await this._db()
+        .whereIn(this.primaryKey, payload.map((_, i) => firstId + i))
+        .select('*');
+      return inserted.map(r => this._hydrate(r));
+    }
+    return [];
+  }
+
+  /**
+   * Delete many rows by primary key in a single query.
+   *
+   *   await Post.bulkDelete([1, 2, 3]);
+   *   await Post.bulkDelete([1, 2, 3], { trx });
+   */
+  static async bulkDelete(ids, { trx } = {}) {
+    if (!ids || ids.length === 0) return 0;
+    const q = trx ? trx(this.table) : this._db();
+    return q.whereIn(this.primaryKey, ids).delete();
   }
 
   // ─── only() / defer() ────────────────────────────────────────────────────
@@ -531,6 +612,53 @@ class Model {
     return new QueryBuilder(this._db(), this);
   }
 
+  /**
+   * Print the SQL for a query without executing it.
+   * Matches Django's str(Model.objects.filter(...).query)
+   *
+   *   console.log(Post.sql({ published: true }))
+   *   // select * from `posts` where `published` = true
+   */
+  static sql(conditions = {}) {
+    let qb = new QueryBuilder(this._db(), this);
+    for (const [k, v] of Object.entries(conditions)) qb = qb.where(k, v);
+    return qb.sql();
+  }
+
+  /**
+   * Get exactly one result — raises if 0 or >1 found.
+   * Matches Django's Model.objects.get()
+   *
+   *   const user = await User.get({ email: 'alice@example.com' });
+   */
+  static async get(conditions = {}) {
+    return new QueryBuilder(this._db(), this).where(conditions).get_one();
+  }
+
+  /**
+   * Return a dict mapping pk → instance.
+   * Matches Django's QuerySet.in_bulk()
+   *
+   *   const map = await Post.inBulk([1, 2, 3]);
+   *   map[1].title
+   */
+  static async inBulk(ids = null, fieldName = null) {
+    return new QueryBuilder(this._db(), this).inBulk(ids, fieldName);
+  }
+
+  /**
+   * Lock rows for update inside a transaction.
+   * Matches Django's QuerySet.select_for_update()
+   *
+   *   await Post.transaction(async (trx) => {
+   *     const post = await Post.where('id', 1).selectForUpdate().first();
+   *     await post.update({ views: post.views + 1 });
+   *   });
+   */
+  static selectForUpdate(options = {}) {
+    return new QueryBuilder(this._db(), this).selectForUpdate(options);
+  }
+
   static async paginate(page = 1, perPage = 15) {
     return new QueryBuilder(this._db(), this).paginate(page, perPage);
   }
@@ -539,7 +667,12 @@ class Model {
 
   constructor(attributes = {}) {
     Object.assign(this, attributes);
-    this._original = { ...attributes };
+    Object.defineProperty(this, '_original', {
+      value:        { ...attributes },
+      writable:     true,
+      enumerable:   false,
+      configurable: true,
+    });
 
     // Use effective relations: explicit static relations PLUS those
     // auto-inferred from ForeignKey / OneToOne / ManyToMany fields.
@@ -570,80 +703,90 @@ class Model {
 
     const BelongsTo     = require('../relations/BelongsTo');
     const HasOne        = require('../relations/HasOne');
+    const HasMany       = require('../relations/HasMany');
     const BelongsToMany = require('../relations/BelongsToMany');
 
-    // Start with explicitly declared relations
     const merged = { ...(this.relations || {}) };
 
     for (const [fieldName, fieldDef] of Object.entries(this.getFields())) {
 
-      // ── ForeignKey / OneToOne ────────────────────────────────────────────
       if (fieldDef._isForeignKey) {
-        // Infer accessor name:
-        //   author_id  → author
-        //   author     → author  (column will be author_id in migration)
-        const accessorName = fieldName.endsWith('_id')
-          ? fieldName.slice(0, -3)
-          : fieldName;
-
-        // Don't overwrite an explicitly declared relation
+        const accessorName = fieldName.endsWith('_id') ? fieldName.slice(0, -3) : fieldName;
         if (!merged[accessorName]) {
-          const modelRef   = fieldDef._fkModelRef;
-          const toField    = fieldDef._fkToField || 'id';
-          const self       = this;
-
-          // self-referential: 'self' means this very model
+          const modelRef     = fieldDef._fkModelRef;
+          const toField      = fieldDef._fkToField || 'id';
+          const self         = this;
           const resolveModel = () => {
             if (fieldDef._fkModel === 'self') return self;
-            const M = typeof modelRef === 'function' ? modelRef() : modelRef;
-            return M;
+            return typeof modelRef === 'function' ? modelRef() : modelRef;
           };
-
-          // Django convention: declared as 'landlord' → DB column 'landlord_id'.
-          // If already ends with _id (e.g. declared as 'landlord_id'), use as-is.
           const colName = fieldName.endsWith('_id') ? fieldName : fieldName + '_id';
-
-          if (fieldDef._isOneToOne) {
-            merged[accessorName] = new BelongsTo(resolveModel, colName, toField);
-          } else {
-            merged[accessorName] = new BelongsTo(resolveModel, colName, toField);
-          }
+          merged[accessorName] = new BelongsTo(resolveModel, colName, toField);
         }
       }
 
-      // ── ManyToMany ────────────────────────────────────────────────────────
       if (fieldDef._isManyToMany && !merged[fieldName]) {
         const thisTableBase  = (this.table || this.name.toLowerCase()).replace(/s$/, '');
         const modelRef       = fieldDef._fkModelRef;
-
-        const resolveRelated = () => {
-          const M = typeof modelRef === 'function' ? modelRef() : modelRef;
-          return M;
-        };
-
-        // Infer pivot table: sort both singular table names alphabetically
-        const relatedName   = typeof fieldDef._fkModel === 'string'
+        const resolveRelated = () => typeof modelRef === 'function' ? modelRef() : modelRef;
+        const relatedName    = typeof fieldDef._fkModel === 'string'
           ? fieldDef._fkModel.toLowerCase().replace(/s$/, '')
           : fieldName.replace(/s$/, '');
-
-        const pivotTable    = fieldDef._m2mThrough
+        const pivotTable = fieldDef._m2mThrough
           || [thisTableBase, relatedName].sort().join('_') + 's';
-
-        const thisFk        = thisTableBase + '_id';
-        const relatedFk     = relatedName + '_id';
-
         merged[fieldName] = new BelongsToMany(
-          resolveRelated,
-          pivotTable,
-          thisFk,
-          relatedFk,
+          resolveRelated, pivotTable,
+          thisTableBase + '_id', relatedName + '_id',
         );
       }
     }
 
+    // Reverse relations via relatedName - like Django auto reverse accessors
+    // Scan app/models/index.js for any model with a ForeignKey pointing to this
+    // model with a relatedName set, then wire HasMany/HasOne back automatically.
+    try {
+      const path      = require('path');
+      const allModels = require(path.join(process.cwd(), 'app', 'models', 'index.js'));
+      const thisTable = this.table;
+
+      for (const RelatedModel of Object.values(allModels)) {
+        if (typeof RelatedModel !== 'function') continue;
+        if (RelatedModel === this) continue;
+        if (!RelatedModel.fields) continue;
+
+        for (const [fName, fDef] of Object.entries(RelatedModel.fields || {})) {
+          if (!fDef || !fDef._isForeignKey || !fDef._fkRelatedName) continue;
+          if (fDef._fkRelatedName === '+') continue;
+
+          let targetTable = null;
+          try {
+            const ref = typeof fDef._fkModelRef === 'function' ? fDef._fkModelRef() : null;
+            targetTable = ref && ref.table ? ref.table : null;
+          } catch (e) {}
+          if (!targetTable && typeof fDef._fkModel === 'string') {
+            targetTable = allModels[fDef._fkModel] && allModels[fDef._fkModel].table
+              ? allModels[fDef._fkModel].table : null;
+          }
+
+          if (targetTable !== thisTable) continue;
+
+          const accessorName = fDef._fkRelatedName;
+          if (merged[accessorName]) continue;
+
+          const fkColumn = fName.endsWith('_id') ? fName : fName + '_id';
+          const Rel      = RelatedModel;
+
+          merged[accessorName] = fDef._isOneToOne
+            ? new HasOne(() => Rel, fkColumn)
+            : new HasMany(() => Rel, fkColumn);
+        }
+      }
+    } catch (e) { /* models index not available */ }
+
     this._cachedRelations = merged;
     return merged;
   }
+
 
   /** Clear the cached relations (call if fields are modified at runtime). */
   static _clearRelationCache() {
@@ -658,10 +801,9 @@ class Model {
   async update(data = {}, { trx } = {}) {
     this.constructor.validate(data);
 
-    const now = new Date().toISOString();
     let payload = {
       ...data,
-      ...(this.constructor.timestamps ? { updated_at: now } : {}),
+      ...this.constructor._updatedAtPayload(),
     };
 
     payload = await this.constructor.beforeUpdate(payload) ?? payload;
@@ -740,6 +882,31 @@ class Model {
     return this;
   }
 
+  /**
+   * Atomically increment a column value.
+   *   await post.increment('views_count');
+   *   await post.increment('views_count', 5);
+   */
+  async increment(column, amount = 1) {
+    await this.constructor._db()
+      .where(this.constructor.primaryKey, this[this.constructor.primaryKey])
+      .increment(column, amount);
+    this[column] = (this[column] || 0) + amount;
+    return this;
+  }
+
+  /**
+   * Atomically decrement a column value.
+   *   await post.decrement('stock', 1);
+   */
+  async decrement(column, amount = 1) {
+    await this.constructor._db()
+      .where(this.constructor.primaryKey, this[this.constructor.primaryKey])
+      .decrement(column, amount);
+    this[column] = (this[column] || 0) - amount;
+    return this;
+  }
+
   get isNew()       { return !this[this.constructor.primaryKey]; }
   get isTrashed()   { return !!this.deleted_at; }
 
@@ -747,8 +914,13 @@ class Model {
     const hidden = new Set(this.constructor.hidden || []);
     const obj = {};
     for (const key of Object.keys(this)) {
-      if (!key.startsWith('_') && typeof this[key] !== 'function' && !hidden.has(key)) {
-        obj[key] = this[key];
+      if (key.startsWith('_') || typeof this[key] === 'function' || hidden.has(key)) continue;
+      const val = this[key];
+      // Serialize Date objects to ISO strings
+      if (val instanceof Date) {
+        obj[key] = isNaN(val.getTime()) ? null : val.toISOString();
+      } else {
+        obj[key] = val;
       }
     }
     return obj;
@@ -787,7 +959,16 @@ class Model {
       case 'decimal':    return typeof val === 'number' ? val : parseFloat(val);
       case 'json':       return typeof val === 'string' ? JSON.parse(val) : val;
       case 'date':
-      case 'timestamp':  return val instanceof Date ? val : new Date(val);
+      case 'timestamp':  {
+        if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+        if (val !== null && typeof val === 'object') {
+          // pg driver returns internal timestamp objects — coerce via valueOf
+          const d = new Date(val.valueOf?.() ?? val);
+          return isNaN(d.getTime()) ? null : d;
+        }
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? null : d;
+      }
       // string-backed types — no casting needed
       case 'string':
       case 'email':
@@ -830,6 +1011,56 @@ class Model {
       }
     }
     return result;
+  }
+
+  static _timestampPayload(existing = {}) {
+    if (!this.timestamps) return {};
+    const fieldKeys = Object.keys(this.getFields());
+    const now = new Date().toISOString();
+    const result = {};
+    if (fieldKeys.includes('created_at') && !existing.created_at) result.created_at = now;
+    if (fieldKeys.includes('updated_at')) result.updated_at = now;
+    return result;
+  }
+
+  static _updatedAtPayload() {
+    if (!this.timestamps) return {};
+    const fieldKeys = Object.keys(this.getFields());
+    if (!fieldKeys.includes('updated_at')) return {};
+    return { updated_at: new Date().toISOString() };
+  }
+
+  static _isPostgres() {
+    try {
+      const client = DatabaseManager.connection(this.connection || null).client?.config?.client || '';
+      return client.includes('pg');
+    } catch { return false; }
+  }
+
+  /**
+   * Insert a row and return the inserted primary key — dialect-aware.
+   * SQLite: insert returns [lastId]
+   * Postgres: requires .returning(pk), returns [{ pk: val }] or [val]
+   * MySQL: insert returns [{ insertId }]
+   */
+  static async _insert(q, payload) {
+    const pk     = this.primaryKey;
+    const client = q.client?.config?.client || '';
+
+    if (client.includes('pg')) {
+      const rows = await q.insert(payload).returning(pk);
+      const row  = rows[0];
+      return typeof row === 'object' ? row[pk] : row;
+    }
+
+    if (client.includes('mysql')) {
+      const result = await q.insert(payload);
+      return result[0]?.insertId ?? result[0];
+    }
+
+    // SQLite — returns [lastInsertRowid]
+    const result = await q.insert(payload);
+    return Array.isArray(result) ? result[0] : result;
   }
 
   static _defaultTable() {

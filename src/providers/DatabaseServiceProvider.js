@@ -26,8 +26,8 @@ class DatabaseServiceProvider extends ServiceProvider {
     let dbConfig;
     try {
       dbConfig = require(basePath + '/config/database');
-    } catch {
-      // Fallback for tests / programmatic use
+    } catch (err) {
+      if (err.code !== 'MODULE_NOT_FOUND') throw err;
       dbConfig = {
         default: 'sqlite',
         connections: {

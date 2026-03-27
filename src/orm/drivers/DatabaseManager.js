@@ -99,6 +99,12 @@ class DatabaseManager {
         });
 
       case 'mysql':
+        try { require('mysql2'); } catch {
+          throw new Error(
+            'MySQL driver not installed.\n' +
+            'Run: npm install mysql2'
+          );
+        }
         return knex({
           client:     'mysql2',
           connection: {
@@ -112,6 +118,12 @@ class DatabaseManager {
         });
 
       case 'postgres':
+        try { require('pg'); } catch {
+          throw new Error(
+            'PostgreSQL driver not installed.\n' +
+            'Run: npm install pg'
+          );
+        }
         return knex({
           client:     'pg',
           connection: {

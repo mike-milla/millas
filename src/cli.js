@@ -1,5 +1,8 @@
 'use strict';
 
+// Load .env before anything else so all commands have access to env vars
+require('dotenv').config();
+
 const { Command } = require('commander');
 const chalk = require('chalk');
 const program = new Command();

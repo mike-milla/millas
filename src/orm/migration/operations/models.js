@@ -48,7 +48,7 @@ class CreateModel extends BaseOperation {
   async up(db) {
     await db.schema.createTable(this.table, (t) => {
       for (const [name, def] of Object.entries(this.fields)) {
-        applyColumn(t, name, normaliseField(def));
+        applyColumn(t, name, normaliseField(def), this.table);
       }
     });
     await this._applyIndexes(db);
@@ -61,7 +61,7 @@ class CreateModel extends BaseOperation {
   async upWithoutFKs(db) {
     await db.schema.createTable(this.table, (t) => {
       for (const [name, def] of Object.entries(this.fields)) {
-        applyColumn(t, name, { ...normaliseField(def), references: null });
+        applyColumn(t, name, { ...normaliseField(def), references: null }, this.table);
       }
     });
     await this._applyIndexes(db);
@@ -134,7 +134,7 @@ class DeleteModel extends BaseOperation {
   async down(db) {
     await db.schema.createTable(this.table, (t) => {
       for (const [name, def] of Object.entries(this.fields)) {
-        applyColumn(t, name, normaliseField(def));
+        applyColumn(t, name, normaliseField(def), this.table);
       }
     });
   }
