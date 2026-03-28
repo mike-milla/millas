@@ -523,6 +523,10 @@ ${this._renderColumn('      ', diff.column, diff.previous, '.alter()')}
                 line = `t.json('${name}')`;
                 break;
 
+            case 'array':
+                line = `t.specificType('${name}', '${field.arrayOf || 'text'}[]')`;
+                break;
+
             case 'date':
                 line = `t.date('${name}')`;
                 break;

@@ -957,7 +957,8 @@ class Model {
       case 'bigInteger': return typeof val === 'bigint' ? val : parseInt(val, 10);
       case 'float':
       case 'decimal':    return typeof val === 'number' ? val : parseFloat(val);
-      case 'json':       return typeof val === 'string' ? JSON.parse(val) : val;
+      case 'json':
+      case 'array':      return typeof val === 'string' ? JSON.parse(val) : (Array.isArray(val) ? val : (val ?? []));
       case 'date':
       case 'timestamp':  {
         if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
@@ -981,7 +982,7 @@ class Model {
 
   static _serializeValue(val, type) {
     if (val == null) return val;
-    if (type === 'json') return typeof val === 'string' ? val : JSON.stringify(val);
+    if (type === 'json' || type === 'array') return typeof val === 'string' ? val : JSON.stringify(val);
     if (type === 'boolean') return val ? 1 : 0;
     if ((type === 'date' || type === 'timestamp') && val instanceof Date) return val.toISOString();
     return val;

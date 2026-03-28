@@ -408,6 +408,12 @@ ${opsCode},
       case 'id':
         return 'fields.id()';
 
+      case 'array': {
+        const of_ = def.arrayOf || 'text';
+        const optsStr = Object.keys(opts).length ? `, ${this._renderOpts(opts)}` : '';
+        return `fields.array('${of_}'${optsStr})`;
+      }
+
       case 'enum': {
         const vals = JSON.stringify(def.enumValues || []);
         const optsStr = Object.keys(opts).length

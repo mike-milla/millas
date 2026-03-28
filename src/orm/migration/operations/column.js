@@ -93,6 +93,24 @@ function _buildColumn(t, name, def, opts = {}) {
     case 'json':
       return t.json(name);
 
+    case 'array': {
+      const client = t.client?.config?.client || '';
+      if (client.includes('pg') || client.includes('postgres')) {
+        // Native Postgres ARRAY type
+        const pgTypeMap = {
+          text: 'text', string: 'text',
+          integer: 'integer', int: 'integer',
+          float: 'float', decimal: 'decimal',
+          boolean: 'boolean',
+          uuid: 'uuid',
+        };
+        const pgType = pgTypeMap[def.arrayOf || 'text'] || 'text';
+        return t.specificType(name, `${pgType}[]`);
+      }
+      // SQLite / MySQL — fall back to JSON
+      return t.json(name);
+    }
+
     case 'date':
       return t.date(name);
 

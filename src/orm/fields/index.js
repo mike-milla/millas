@@ -101,6 +101,24 @@ const fields = {
         return new FieldDefinition('json', options);
     },
 
+    /**
+     * Array field — stores an ordered list of values.
+     *
+     * On PostgreSQL: uses native ARRAY type (text[], integer[], etc.)
+     * On SQLite/MySQL: falls back to JSON column (same as fields.json())
+     *
+     * @param {string} [of='text']  — item type: 'text' | 'integer' | 'float' | 'boolean'
+     *
+     * @example
+     *   tags:      fields.array()              // text[] on PG, json on SQLite
+     *   scores:    fields.array('integer')     // integer[] on PG
+     *   media_ids: fields.array('integer', { nullable: true, default: [] })
+     */
+    array(of = 'text', options = {}) {
+        if (typeof of === 'object') { options = of; of = 'text'; }
+        return new FieldDefinition('array', { arrayOf: of, nullable: true, default: [], ...options });
+    },
+
     date(options = {}) {
         return new FieldDefinition('date', options);
     },
