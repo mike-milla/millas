@@ -81,7 +81,18 @@ class EventEmitter {
   async _invoke(handler, event) {
     // Listener class (has handle() on prototype)
     if (typeof handler === 'function' && typeof handler.prototype?.handle === 'function') {
-      const inst = new handler();
+      // Resolve static inject dependencies from the container
+      let inst;
+      if (handler.inject && Array.isArray(handler.inject) && handler.inject.length) {
+        const Facade = require('../facades/Facade');
+        const container = Facade._container;
+        const deps = handler.inject.map(key => {
+          try { return container ? container.make(key) : undefined; } catch { return undefined; }
+        });
+        inst = new handler(...deps);
+      } else {
+        inst = new handler();
+      }
       if (handler.queue && this._queue) {
         const Job = require('../queue/Job');
         const q   = this._queue;

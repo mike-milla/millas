@@ -1,43 +1,64 @@
 'use strict';
 
+const Facade = require('./Facade');
+
 /**
- * millas/facades/Database
+ * Database facade — direct access to the knex connection.
  *
- * ORM models, field definitions, and query builder.
+ * Usage:
+ *   const Database = require('millas/facades/Database');
  *
- *   const { Model, fields } = require('millas/facades/Database');
+ *   // Raw SQL
+ *   const result = await Database.raw('SELECT NOW()');
  *
- *   class Post extends Model {
- *     static table = 'posts';
- *     static fields = {
- *       id:         fields.id(),
- *       title:      fields.string({ max: 255 }),
- *       author:     fields.ForeignKey('User', { relatedName: 'posts' }),
- *       published:  fields.boolean({ default: false }),
- *       created_at: fields.timestamp(),
- *       updated_at: fields.timestamp(),
- *     };
- *   }
+ *   // Knex query builder
+ *   const rows = await Database.table('posts').where('published', true).select('*');
+ *
+ *   // Named connection
+ *   const rows = await Database.connection('replica').raw('SELECT 1');
  */
+class Database {
+  static _resolveInstance() {
+    const DatabaseManager = require('../orm/drivers/DatabaseManager');
+    return DatabaseManager.connection();
+  }
+}
 
-const {
-  Model,
-  fields,
-  QueryBuilder,
-  DatabaseManager,
-  SchemaBuilder,
-  MigrationRunner,
-  ModelInspector,
-  DatabaseServiceProvider,
-} = require('../core');
+// Proxy every static call to the knex connection
+module.exports = new Proxy(Database, {
+  get(target, prop) {
+    // Let real static members through
+    if (prop in target || prop === 'then' || prop === 'catch') {
+      return target[prop];
+    }
+    if (typeof prop === 'symbol') return target[prop];
 
-module.exports = {
-  Model,
-  fields,
-  QueryBuilder,
-  DatabaseManager,
-  SchemaBuilder,
-  MigrationRunner,
-  ModelInspector,
-  DatabaseServiceProvider,
-};
+    // Special case: raw() — normalize result across dialects
+    if (prop === 'raw') {
+      return async (sql, bindings) => {
+        const db = Database._resolveInstance();
+        const result = await db.raw(sql, bindings);
+        // Postgres returns { rows: [...], command, rowCount, ... }
+        // SQLite/MySQL return [rows, fields] or just rows
+        if (result && result.rows) return result.rows;
+        if (Array.isArray(result)) return result[0] ?? result;
+        return result;
+      };
+    }
+
+    // Special case: connection(name) returns a named knex instance
+    if (prop === 'connection') {
+      return (name) => {
+        const DatabaseManager = require('../orm/drivers/DatabaseManager');
+        return DatabaseManager.connection(name || null);
+      };
+    }
+
+    // Proxy everything else to the default knex connection
+    return (...args) => {
+      const db = Database._resolveInstance();
+      if (typeof db[prop] !== 'function') return db[prop];
+      return db[prop](...args);
+    };
+  },
+});
