@@ -253,6 +253,27 @@ class QueryBuilder {
     return this;
   }
 
+  join(table, col1, col2, col3) {
+    this._query = col3
+      ? this._query.join(table, col1, col2, col3)
+      : this._query.join(table, col1, col2);
+    return this;
+  }
+
+  leftJoin(table, col1, col2, col3) {
+    this._query = col3
+      ? this._query.leftJoin(table, col1, col2, col3)
+      : this._query.leftJoin(table, col1, col2);
+    return this;
+  }
+
+  rightJoin(table, col1, col2, col3) {
+    this._query = col3
+      ? this._query.rightJoin(table, col1, col2, col3)
+      : this._query.rightJoin(table, col1, col2);
+    return this;
+  }
+
   having(column, operatorOrValue, value) {
     if (value !== undefined) {
       this._query = this._query.having(column, operatorOrValue, value);
