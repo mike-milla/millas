@@ -73,6 +73,7 @@ class AppInitializer {
      */
     async bootKernel() {
         const cfg = this._config;
+        const basePath = cfg.basePath || process.cwd();
 
         const ExpressAdapter = require('../http/adapters/ExpressAdapter');
         const expressApp = express();
@@ -83,7 +84,6 @@ class AppInitializer {
         // Reads config/app.js for overrides. All protections are on by default:
         // security headers, CSRF, rate limiting, cookie defaults, allowed hosts.
         const SecurityBootstrap = require('../http/SecurityBootstrap');
-        const basePath          = cfg.basePath || process.cwd();
         const appConfig         = SecurityBootstrap.loadConfig(basePath + '/config/app');
         SecurityBootstrap.apply(this._adapter.nativeApp || expressApp, appConfig);
 

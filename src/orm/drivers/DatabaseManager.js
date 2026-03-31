@@ -206,7 +206,21 @@ class DatabaseManager {
             'Run: npm install pg'
           );
         }
-        return knex({
+        
+        // Configure pg to parse timestamps as UTC
+        const types = require('pg').types;
+        const TIMESTAMP_OID = 1114; // timestamp without timezone
+        const TIMESTAMPTZ_OID = 1184; // timestamp with timezone
+        
+        // Override pg's default timestamp parser to always return UTC
+        types.setTypeParser(TIMESTAMP_OID, (val) => {
+          return val === null ? null : new Date(val + 'Z'); // Treat as UTC
+        });
+        types.setTypeParser(TIMESTAMPTZ_OID, (val) => {
+          return val === null ? null : new Date(val); // Already has timezone
+        });
+        
+        const pgConnection = knex({
           client:     'pg',
           connection: {
             host:     conf.host,
@@ -215,8 +229,15 @@ class DatabaseManager {
             user:     conf.username,
             password: conf.password,
           },
-          pool: { min: 2, max: 10 },
+          pool: { 
+            min: 2, 
+            max: 10,
+            afterCreate: (conn, done) => {
+              conn.query('SET timezone = "UTC";', (err) => done(err, conn));
+            },
+          },
         });
+        return pgConnection;
 
       default:
         throw new Error(`Unsupported database driver: "${conf.driver}"`);

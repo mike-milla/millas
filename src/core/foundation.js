@@ -47,6 +47,7 @@ const UploadedFile     = require('../http/UploadedFile');
 // ── Serializer ────────────────────────────────────────────────────
 const { Serializer } = require('../serializer/Serializer');
 const {Str, FluentString} = require("../support/Str");
+const Time = require('../support/Time');
 
 module.exports = {
   // ── Millas HTTP layer ──────────────────────────────────────────
@@ -68,7 +69,7 @@ module.exports = {
   // Serializer
   Serializer,
   // Support
-  Str, FluentString,
+  Str, FluentString, Time,
   Log: require('../logger').Log,
   // Scheduler
   TaskScheduler: require('../scheduler').TaskScheduler,

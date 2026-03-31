@@ -30,7 +30,7 @@ class JsonFormatter {
     const { level, tag, message, context, error, timestamp } = entry;
 
     const record = {
-      ts:    timestamp || new Date().toISOString(),
+      ts:    timestamp instanceof Date ? timestamp.toISOString() : (timestamp || new Date().toISOString()),
       level: LEVEL_NAMES[level] || String(level),
       ...this.extra,
     };

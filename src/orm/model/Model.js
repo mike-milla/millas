@@ -967,6 +967,15 @@ class Model {
           const d = new Date(val.valueOf?.() ?? val);
           return isNaN(d.getTime()) ? null : d;
         }
+        // Django-style USE_TZ: if enabled, treat naive DB timestamps as UTC
+        if (this._isUseTzEnabled()) {
+          // Parse as UTC by appending 'Z' if no timezone info present
+          const str = String(val);
+          if (!str.includes('Z') && !str.includes('+') && !str.includes('-', 10)) {
+            const d = new Date(str + 'Z');
+            return isNaN(d.getTime()) ? null : d;
+          }
+        }
         const d = new Date(val);
         return isNaN(d.getTime()) ? null : d;
       }
@@ -1036,6 +1045,15 @@ class Model {
       const client = DatabaseManager.connection(this.connection || null).client?.config?.client || '';
       return client.includes('pg');
     } catch { return false; }
+  }
+
+  static _isUseTzEnabled() {
+    try {
+      const appConfig = require(process.cwd() + '/config/app.js');
+      return appConfig.useTz !== false; // Default to true (Django-style)
+    } catch {
+      return true;
+    }
   }
 
   /**

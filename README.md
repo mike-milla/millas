@@ -89,6 +89,25 @@ class User extends Model {
 }
 ```
 
+## Configuration
+
+```js
+// config/app.js
+module.exports = {
+  name: 'My App',
+  env: process.env.NODE_ENV || 'development',
+  timezone: 'UTC',  // Scheduler timezone (cron timing)
+  
+  // ORM timezone behavior (Django-style)
+  useTz: true,  // true = treat DB timestamps as UTC (recommended)
+                // false = treat DB timestamps as local server time
+                // Column type stays TIMESTAMP (without timezone)
+                // Conversion happens in application layer
+  
+  allowedHosts: [],  // Django-style host validation
+};
+```
+
 ## Authentication
 
 ```js

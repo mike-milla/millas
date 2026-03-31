@@ -135,8 +135,9 @@ class PrettyFormatter {
 
   _timestamp() {
     const now = new Date();
-    if (this.tsFormat === 'iso') return now.toISOString();
-    return now.toISOString().replace('T', ' ').slice(0, 19);
+    const isoStr = now.toISOString();
+    if (this.tsFormat === 'iso') return isoStr;
+    return isoStr.replace('T', ' ').slice(0, 19);
   }
 }
 

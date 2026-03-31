@@ -26,7 +26,8 @@ class SimpleFormatter {
   format(entry) {
     const { level, tag, message, context, error, timestamp } = entry;
 
-    const ts      = (timestamp || new Date().toISOString()).replace('T', ' ').slice(0, 23);
+    const isoStr  = timestamp instanceof Date ? timestamp.toISOString() : (timestamp || new Date().toISOString());
+    const ts      = isoStr.replace('T', ' ').slice(0, 23);
     const lvlName = (LEVEL_NAMES[level] || String(level)).padEnd(7);
     const tagPart = tag ? `${tag}: ` : '';
 
