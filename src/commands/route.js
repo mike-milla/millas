@@ -20,7 +20,7 @@ module.exports = function (program) {
 
       let route;
       try {
-        const bootstrap = require(bootstrapPath);
+        const bootstrap = await require(bootstrapPath);
         route = bootstrap.route;
       } catch (err) {
         console.error(chalk.red(`\n  ✖ Failed to load routes: ${err.message}\n`));

@@ -274,6 +274,21 @@ class QueryBuilder {
     return this;
   }
 
+  joinRaw(sql, bindings = []) {
+    this._query = this._query.joinRaw(sql, bindings);
+    return this;
+  }
+
+  leftJoinRaw(sql, bindings = []) {
+    this._query = this._query.leftJoinRaw(sql, bindings);
+    return this;
+  }
+
+  crossJoin(table) {
+    this._query = this._query.crossJoin(table);
+    return this;
+  }
+
   having(column, operatorOrValue, value) {
     if (value !== undefined) {
       this._query = this._query.having(column, operatorOrValue, value);

@@ -15,8 +15,8 @@ const SchemaBuilder   = require('../orm/migration/SchemaBuilder');
  */
 class DatabaseServiceProvider extends ServiceProvider {
   register(container) {
-    // Make DatabaseManager available as a singleton in the container
-    container.instance('db',              DatabaseManager);
+    // Register DatabaseManager singleton (provides Laravel-style DB methods)
+    container.instance('db', DatabaseManager);
     container.instance('DatabaseManager', DatabaseManager);
   }
 

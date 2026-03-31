@@ -104,11 +104,27 @@ class Admin {
 
   _setupNunjucks(expressApp) {
     const viewsDir = path.join(__dirname, 'views');
-    const env = nunjucks.configure(viewsDir, {
-      autoescape: true,
-      express:    expressApp,
-      noCache:    process.env.NODE_ENV !== 'production',
-    });
+    
+    // Check if nunjucks is already configured by the main app
+    const existingEnv = expressApp.get('nunjucksEnvironment');
+    let env;
+    
+    if (existingEnv) {
+      // Create a new environment that includes both search paths
+      const mainAppViewsDir = expressApp.get('views');
+      env = nunjucks.configure([viewsDir, mainAppViewsDir], {
+        autoescape: true,
+        express:    expressApp,
+        noCache:    process.env.NODE_ENV !== 'production',
+      });
+    } else {
+      env = nunjucks.configure(viewsDir, {
+        autoescape: true,
+        express:    expressApp,
+        noCache:    process.env.NODE_ENV !== 'production',
+      });
+      expressApp.set('nunjucksEnvironment', env);
+    }
 
     const resolveFkSlug = (tableName) => {
       if (!tableName) return null;

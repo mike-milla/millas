@@ -58,6 +58,7 @@ class AppInitializer {
         if (!process.env.MILLAS_CLI_MODE) {
             await this._serve();
         }
+
         return this._kernel;
     }
 
@@ -106,6 +107,12 @@ class AppInitializer {
         this._kernel = new Application(this._adapter);
 
         this._kernel._container.instance('basePath', basePath);
+
+        // ── View engine ─────────────────────────────────────────────────────────────────
+        // Auto-configure Nunjucks as the default template engine.
+        // Looks for views/ in the project root. Zero config required.
+        // Disable via config/app.js: { views: false }
+        this._setupViewEngine(expressApp, basePath, appConfig);
 
         // ── Static file serving ───────────────────────────────────────────────
         // Auto-serve each storage disk that has a baseUrl configured.
@@ -181,6 +188,65 @@ class AppInitializer {
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
+
+    _setupViewEngine(expressApp, basePath, appConfig) {
+        const path = require('path');
+        const fs   = require('fs');
+
+        // Opt-out: views: false in config/app.js
+        if (appConfig.views === false) return;
+
+        const viewsConfig = appConfig.views || {};
+        const viewsDir    = path.isAbsolute(viewsConfig.path || '')
+            ? viewsConfig.path
+            : path.join(basePath, viewsConfig.path || 'resources/views');
+
+        // Don't configure if views directory doesn't exist
+        if (!fs.existsSync(viewsDir)) return;
+
+        // Serve public/ directory for CSS, JS, images used in views
+        const publicDir = path.join(basePath, viewsConfig.public || 'public');
+        if (fs.existsSync(publicDir)) {
+            expressApp.use(express.static(publicDir));
+        }
+
+        const engine = viewsConfig.engine || 'nunjucks';
+
+        if (engine === 'nunjucks') {
+            // nunjucks is a core Millas dependency — always available
+            const nunjucks = require('nunjucks');
+
+            // Check if nunjucks is already configured for this express app
+            const existingEnv = expressApp.get('nunjucksEnvironment');
+            let env;
+            
+            if (existingEnv) {
+                // Admin panel will reconfigure with multiple search paths
+                env = existingEnv;
+            } else {
+                env = nunjucks.configure(viewsDir, {
+                    autoescape:    viewsConfig.autoescape    ?? true,
+                    watch:         viewsConfig.watch         ?? (process.env.NODE_ENV !== 'production'),
+                    noCache:       viewsConfig.noCache       ?? (process.env.NODE_ENV !== 'production'),
+                    throwOnUndefined: viewsConfig.throwOnUndefined ?? false,
+                    express:       expressApp,
+                });
+                // Store reference for later use
+                expressApp.set('nunjucksEnvironment', env);
+            }
+
+            // Support both .html and .njk extensions
+            expressApp.set('view engine', 'html');
+            expressApp.engine('html', env.render.bind(env));
+            expressApp.engine('njk',  env.render.bind(env));
+            expressApp.set('views', viewsDir);
+
+        } else {
+            // Custom engine — user must configure it themselves via .use()
+            expressApp.set('views', viewsDir);
+            expressApp.set('view engine', engine);
+        }
+    }
 
     _serveStorageDisks(expressApp, basePath) {
         const express = require('express');
@@ -286,10 +352,18 @@ class AppInitializer {
             if (p) providers.push(p);
         }
 
-        // ── 9. i18n — opt-in via config/app.js use_i18n: true ───────────────
+        // ── 9. Scheduler — always on unless explicitly disabled ──────────────
+        // Built-in task scheduler that runs alongside the HTTP server.
+        // Automatically loads and executes scheduled tasks from routes/schedule.js.
+        if (cfg.scheduler !== false) {
+            const p = load('../scheduler/SchedulerServiceProvider');
+            if (p) providers.push(p);
+        }
+
+        // ── 10. i18n — opt-in via config/app.js use_i18n: true ──────────────
         // Mirrors Django's USE_I18N = True in settings.py.
         // Booted last so translations are available in all request handlers.
-        // ── 9. Encryption — always on (APP_KEY drives it) ────────────────────
+        // ── 10. Encryption — always on (APP_KEY drives it) ────────────────────
         // Mirrors Laravel: the encrypter is always bound so Crypt / Encrypt
         // facades work out of the box. If APP_KEY is absent a clear error is
         // thrown on first use, not at boot — apps without encryption still start.

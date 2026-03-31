@@ -52,6 +52,88 @@ class DatabaseManager {
   }
 
   /**
+   * Query builder for a table (Laravel: DB::table('users'))
+   */
+  table(tableName) {
+    return this.db(tableName);
+  }
+
+  /**
+   * Execute raw SQL SELECT (Laravel: DB::select())
+   */
+  async select(sql, bindings = []) {
+    const result = await this.db.raw(sql, bindings);
+    // Normalize across dialects
+    if (result && result.rows) return result.rows;
+    if (Array.isArray(result)) return result[0] ?? result;
+    return result;
+  }
+
+  /**
+   * Execute INSERT (Laravel: DB::insert())
+   */
+  async insert(sql, bindings = []) {
+    return this.db.raw(sql, bindings);
+  }
+
+  /**
+   * Execute UPDATE (Laravel: DB::update())
+   */
+  async update(sql, bindings = []) {
+    return this.db.raw(sql, bindings);
+  }
+
+  /**
+   * Execute DELETE (Laravel: DB::delete())
+   */
+  async delete(sql, bindings = []) {
+    return this.db.raw(sql, bindings);
+  }
+
+  /**
+   * Execute raw SQL (Laravel: DB::raw())
+   */
+  async raw(sql, bindings = []) {
+    return this.db.raw(sql, bindings);
+  }
+
+  /**
+   * Run queries in a transaction (Laravel: DB::transaction())
+   */
+  async transaction(callback) {
+    return this.db.transaction(callback);
+  }
+
+  /**
+   * Begin a transaction manually (Laravel: DB::beginTransaction())
+   */
+  async beginTransaction() {
+    const trx = await this.db.transaction();
+    return trx;
+  }
+
+  /**
+   * Execute a statement (Laravel: DB::statement())
+   */
+  async statement(sql, bindings = []) {
+    return this.db.raw(sql, bindings);
+  }
+
+  /**
+   * Execute unprepared statement (Laravel: DB::unprepared())
+   */
+  async unprepared(sql) {
+    return this.db.raw(sql);
+  }
+
+  /**
+   * Get schema builder (Laravel: DB::getSchemaBuilder())
+   */
+  get schema() {
+    return this.db.schema;
+  }
+
+  /**
    * Close all connections.
    */
   async closeAll() {

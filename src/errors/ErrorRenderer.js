@@ -73,6 +73,30 @@ class ErrorRenderer {
       return res.json(body);
     }
 
+
+    // Check for custom error view in resources/views/errors/
+    // e.g. resources/views/errors/404.html, resources/views/errors/500.html
+    const customView = ErrorRenderer._findCustomErrorView(status);
+    if (customView) {
+      try {
+        return res.render(customView, {
+          status,
+          message:     err.message,
+          error:       err,
+          isDev,
+          statusTitle: ErrorRenderer._statusTitle(status),
+        }, (renderErr) => {
+          if (renderErr) {
+            // View engine error — fall back to built-in pages
+            if (!isDev || status < 500 && !err._forceDebug) {
+              return res.send(ErrorRenderer._renderSimple(status, err.message));
+            }
+            return res.send(ErrorRenderer._renderDebug(err, req, status));
+          }
+        });
+      } catch { /* view engine not configured — fall through */ }
+    }
+
     if (!isDev || status < 500 && !err._forceDebug) {
       // ── Production / 4xx HTML ──────────────────────────────────────────────
       return res.send(ErrorRenderer._renderSimple(status, err.message));
@@ -83,6 +107,24 @@ class ErrorRenderer {
   }
 
   // ─── HTML renderers ────────────────────────────────────────────────────────
+
+  static _findCustomErrorView(status) {
+    const fs   = require('fs');
+    const path = require('path');
+    const viewsDir = path.join(process.cwd(), 'resources', 'views', 'errors');
+    const candidates = [
+      path.join(viewsDir, `${status}.html`),
+      path.join(viewsDir, `${status}.njk`),
+      path.join(viewsDir, 'error.html'),
+      path.join(viewsDir, 'error.njk'),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return `errors/${require('path').basename(candidate)}`;
+      }
+    }
+    return null;
+  }
 
   static _renderSimple(status, message) {
     const title = ErrorRenderer._statusTitle(status);

@@ -70,4 +70,6 @@ module.exports = {
   // Support
   Str, FluentString,
   Log: require('../logger').Log,
+  // Scheduler
+  TaskScheduler: require('../scheduler').TaskScheduler,
 };

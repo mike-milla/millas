@@ -3,6 +3,9 @@
 // Load .env before anything else so all commands have access to env vars
 require('dotenv').config();
 
+// Set CLI mode globally for all commands
+process.env.MILLAS_CLI_MODE = 'true';
+
 const { Command } = require('commander');
 const chalk = require('chalk');
 const program = new Command();
@@ -20,6 +23,7 @@ require('./commands/make')(program);
 require('./commands/migrate')(program);
 require('./commands/route')(program);
 require('./commands/queue')(program);
+require('./commands/schedule')(program);
 require('./commands/createsuperuser')(program);
 require('./commands/lang')(program);
 require('./commands/key')(program);

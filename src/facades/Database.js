@@ -1,64 +1,53 @@
 'use strict';
 
-const Facade = require('./Facade');
+const { createFacade } = require('./Facade');
 
 /**
- * Database facade — direct access to the knex connection.
+ * Database facade — Laravel-style DB access.
  *
  * Usage:
+ *   const { Database } = require('millas');
+ *   // or
  *   const Database = require('millas/facades/Database');
  *
  *   // Raw SQL
- *   const result = await Database.raw('SELECT NOW()');
+ *   const users = await Database.select('SELECT * FROM users WHERE id = ?', [1]);
+ *   await Database.insert('INSERT INTO users (name, email) VALUES (?, ?)', ['John', 'john@example.com']);
+ *   await Database.update('UPDATE users SET name = ? WHERE id = ?', ['Jane', 1]);
+ *   await Database.delete('DELETE FROM users WHERE id = ?', [1]);
  *
- *   // Knex query builder
- *   const rows = await Database.table('posts').where('published', true).select('*');
+ *   // Query Builder (most common)
+ *   const users = await Database.table('users').get();
+ *   const user = await Database.table('users').where('id', 1).first();
+ *   await Database.table('users').insert({ name: 'John', email: 'john@example.com' });
+ *   await Database.table('users').where('id', 1).update({ name: 'Jane' });
+ *   await Database.table('users').where('id', 1).delete();
  *
- *   // Named connection
- *   const rows = await Database.connection('replica').raw('SELECT 1');
+ *   // Transactions
+ *   await Database.transaction(async (trx) => {
+ *     await trx.table('accounts').update({ balance: 100 });
+ *     await trx.table('transactions').insert({ amount: 100 });
+ *   });
+ *
+ *   // Multiple connections
+ *   await Database.connection('mysql').table('users').get();
+ *
+ *   // Raw expressions
+ *   await Database.table('users').select(Database.raw('COUNT(*) as total')).first();
+ *
+ * @class
+ * @property {function(string): *}                    table       - Query builder for a table
+ * @property {function(string, array=): Promise<*>}   raw         - Execute raw SQL
+ * @property {function(string, array=): Promise<*>}   select      - SELECT query
+ * @property {function(string, array=): Promise<*>}   insert      - INSERT query
+ * @property {function(string, array=): Promise<*>}   update      - UPDATE query
+ * @property {function(string, array=): Promise<*>}   delete      - DELETE query
+ * @property {function(function): Promise<*>}         transaction - Run queries in transaction
+ * @property {function(string=): *}                   connection  - Get named connection
+ *
+ * @see src/orm/drivers/DatabaseManager.js
  */
-class Database {
-  static _resolveInstance() {
-    const DatabaseManager = require('../orm/drivers/DatabaseManager');
-    return DatabaseManager.connection();
-  }
+class Database extends createFacade('db') {
 }
 
-// Proxy every static call to the knex connection
-module.exports = new Proxy(Database, {
-  get(target, prop) {
-    // Let real static members through
-    if (prop in target || prop === 'then' || prop === 'catch') {
-      return target[prop];
-    }
-    if (typeof prop === 'symbol') return target[prop];
-
-    // Special case: raw() — normalize result across dialects
-    if (prop === 'raw') {
-      return async (sql, bindings) => {
-        const db = Database._resolveInstance();
-        const result = await db.raw(sql, bindings);
-        // Postgres returns { rows: [...], command, rowCount, ... }
-        // SQLite/MySQL return [rows, fields] or just rows
-        if (result && result.rows) return result.rows;
-        if (Array.isArray(result)) return result[0] ?? result;
-        return result;
-      };
-    }
-
-    // Special case: connection(name) returns a named knex instance
-    if (prop === 'connection') {
-      return (name) => {
-        const DatabaseManager = require('../orm/drivers/DatabaseManager');
-        return DatabaseManager.connection(name || null);
-      };
-    }
-
-    // Proxy everything else to the default knex connection
-    return (...args) => {
-      const db = Database._resolveInstance();
-      if (typeof db[prop] !== 'function') return db[prop];
-      return db[prop](...args);
-    };
-  },
-});
+module.exports = Database;

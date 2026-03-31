@@ -134,17 +134,25 @@ class HttpServer {
 
     _handleSignals() {
         const shutdown = async (signal) => {
+            process.stdout.write(`\n  Shutting down (${signal})…\n`);
+            
+            if (typeof this._options.onShutdown === 'function') {
+                try {
+                    await this._options.onShutdown();
+                } catch (err) {
+                    console.error('Shutdown error:', err.message);
+                }
+            }
+            
+            // Stop scheduler if it exists
+            try {
+                const scheduler = this._app._container.make('scheduler');
+                await scheduler.stop();
+            } catch {
+                // Scheduler not registered or already stopped
+            }
+            
             process.exit(0);
-            // process.stdout.write(`\n  Shutting down (${signal})…\n`);
-            //
-            // if (typeof this._options.onShutdown === 'function') {
-            //     try {
-            //         await this._options.onShutdown();
-            //     } catch {
-            //     }
-            // }
-            //
-            // await this._app.shutdown(0);
         };
 
         process.once('SIGTERM', () => shutdown("SIGTERM"));

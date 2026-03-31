@@ -26,8 +26,7 @@ module.exports = function (program) {
       process.env.MILLAS_ROUTE_LIST = 'true'; // suppress server listen
       let app;
       try {
-        const bootstrap = require(bootstrapPath);
-        app = bootstrap.app;
+        app = await require(bootstrapPath);
       } catch (e) {
         console.error(chalk.red(`\n  ✖ Failed to load app: ${e.message}\n`));
         process.exit(1);
