@@ -55,11 +55,12 @@ class ErrorRenderer {
    * Render an error to the response — JSON or HTML based on Accept header.
    */
   static render(err, req, res) {
-    const status  = err.status || err.statusCode || 500;
-    const isDev   = process.env.NODE_ENV !== 'production';
-    const wantsHtml = ErrorRenderer._wantsHtml(req);
+   try {
+     const status  = err.status || err.statusCode || 500;
+     const isDev   = process.env.NODE_ENV !== 'production';
+     const wantsHtml = ErrorRenderer._wantsHtml(req);
 
-    res.status(status);
+     res.status(status);
 
     if (!wantsHtml) {
       // ── JSON response ──────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ class ErrorRenderer {
           error:       err,
           isDev,
           statusTitle: ErrorRenderer._statusTitle(status),
-        }, (renderErr) => {
+        }, (renderErr, html) => {
           if (renderErr) {
             // View engine error — fall back to built-in pages
             if (!isDev || status < 500 && !err._forceDebug) {
@@ -93,6 +94,7 @@ class ErrorRenderer {
             }
             return res.send(ErrorRenderer._renderDebug(err, req, status));
           }
+          res.send(html);
         });
       } catch { /* view engine not configured — fall through */ }
     }
@@ -104,6 +106,10 @@ class ErrorRenderer {
 
     // ── Development HTML — full debug page ────────────────────────────────────
     res.send(ErrorRenderer._renderDebug(err, req, status));
+   }catch (e){
+     console.log(e)
+     res.send("something went wrong")
+   }
   }
 
   // ─── HTML renderers ────────────────────────────────────────────────────────
@@ -180,6 +186,24 @@ class ErrorRenderer {
       'PID':         process.pid,
       'Uptime':      `${Math.floor(process.uptime())}s`,
     };
+
+    // Host details for EINVALIDHOST errors
+    const hostDetailsHtml = err._hostDetails ? `
+    <!-- Host Details -->
+    <div class="section">
+      <div class="section-header" onclick="toggle(this)">
+        <span>Host Configuration</span>
+        <span class="toggle">▾</span>
+      </div>
+      <div class="section-body">
+        <table class="info-table">
+          <tr><td>Received Host</td><td style="font-family:monospace;color:var(--red)">${_esc(err._hostDetails.receivedHost)}</td></tr>
+          <tr><td>Allowed Hosts</td><td><pre class="json-val">${_esc(JSON.stringify(err._hostDetails.allowedHosts, null, 2))}</pre></td></tr>
+          <tr><td>Environment</td><td>${_esc(err._hostDetails.environment)}</td></tr>
+          ${err._hostDetails.suggestion ? `<tr><td>Suggestion</td><td style="color:var(--blue)">${_esc(err._hostDetails.suggestion)}</td></tr>` : ''}
+        </table>
+      </div>
+    </div>` : '';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -507,6 +531,8 @@ class ErrorRenderer {
         </details>
       </div>
     </div>
+
+    ${hostDetailsHtml}
 
     ${err.errors ? `
     <!-- Validation errors -->

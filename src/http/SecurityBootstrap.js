@@ -1,12 +1,21 @@
 'use strict';
 
-const SecurityHeaders  = require('./middleware/SecurityHeaders');
-const CsrfMiddleware   = require('./middleware/CsrfMiddleware');
-const { RateLimiter }  = require('./middleware/RateLimiter');
-const MillasResponse   = require('./MillasResponse');
+const SecurityHeaders      = require('./middleware/SecurityHeaders');
+const CsrfMiddleware       = require('./middleware/CsrfMiddleware');
+const { RateLimiter }      = require('./middleware/RateLimiter');
+const AllowedHostsMiddleware = require('./middleware/AllowedHostsMiddleware');
+const MillasResponse       = require('./MillasResponse');
 
 class SecurityBootstrap {
   static apply(app, config = {}) {
+    // ── ALLOWED_HOSTS (Django-style) ──────────────────────────────────────────
+    // Must be first — reject invalid hosts before any other processing
+    const allowedHostsMiddleware = AllowedHostsMiddleware.from({
+      allowedHosts: config.allowedHosts,
+      env: config.env || process.env.APP_ENV || 'production',
+    });
+    app.use(allowedHostsMiddleware.middleware());
+
     const headerConfig = config.headers !== undefined ? config.headers : {};
     app.use(SecurityHeaders.from(headerConfig).middleware());
 
@@ -48,6 +57,7 @@ class SecurityBootstrap {
 
     if (process.env.MILLAS_DEBUG_SECURITY === 'true') {
       console.log('[Millas Security] Controls applied:');
+      console.log('  ✓ Allowed hosts:    ', config.allowedHosts === false ? 'DISABLED' : (config.allowedHosts || 'development defaults'));
       console.log('  ✓ Security headers:  ', headerConfig === false ? 'DISABLED' : 'enabled');
       console.log('  ✓ Cookie defaults:   ', JSON.stringify(MillasResponse.getCookieDefaults()));
       console.log('  ✓ Global rate limit: ', globalRateLimit ? `${config.rateLimit?.global?.max || 100} req/window` : 'disabled');
@@ -69,6 +79,7 @@ class SecurityBootstrap {
       if (err.code === 'EVALIDATION' || err.name === 'ValidationError') {
         return res.status(422).json({ message: 'Validation failed', errors: err.errors || {} });
       }
+      // Pass all other errors (including EINVALIDHOST) to the main error handler
       next(err);
     });
   }
