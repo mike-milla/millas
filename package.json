@@ -1,6 +1,6 @@
 {
   "name": "millas",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "A modern batteries-included backend framework for Node.js — built on Express, inspired by Laravel, Django, and FastAPI",
   "main": "src/index.js",
   "exports": {

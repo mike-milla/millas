@@ -569,6 +569,10 @@ class Model {
     return new QueryBuilder(this._db(), this).select(...cols);
   }
 
+  static selectRaw(sql, bindings = []) {
+    return new QueryBuilder(this._db(), this).selectRaw(sql, bindings);
+  }
+
   static distinct(...cols) {
     return new QueryBuilder(this._db(), this).distinct(...cols);
   }

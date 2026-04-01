@@ -78,12 +78,30 @@ class RouteEntry {
    * Add extra middleware to this specific route after registration.
    * Middleware aliases are appended to the existing list.
    *
+   * Supports Laravel-style parameters:
+   *   .middleware('auth')
+   *   .middleware(['auth', 'throttle'])
+   *   .middleware('verifyAction:payment_method_delete')
+   *   .middleware(['auth', 'verifyAction:payment_method_delete'])
+   *
    * @param {string|string[]} middleware
    * @returns {RouteEntry}
    */
   middleware(mw) {
     const list = Array.isArray(mw) ? mw : [mw];
     this._entry.middleware = [...(this._entry.middleware || []), ...list];
+    return this;
+  }
+
+  /**
+   * Set route name (Laravel-style).
+   *   Route.get('/users', UserController, 'index').name('users.index')
+   *
+   * @param {string} name
+   * @returns {RouteEntry}
+   */
+  name(name) {
+    this._entry.name = name;
     return this;
   }
 }
