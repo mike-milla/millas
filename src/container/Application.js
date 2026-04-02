@@ -174,7 +174,7 @@ class Application {
             || parseInt(process.env.MILLAS_INTERNAL_PORT, 10)
             || parseInt(process.env.APP_PORT, 10)
             || 3000;
-        const _host = host || process.env.MILLAS_HOST || 'localhost';
+        const _host = host || 'localhost';
 
         await this._adapter.listen(_port, _host);
 

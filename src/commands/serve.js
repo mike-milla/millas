@@ -81,11 +81,14 @@ class HotReloader {
             extra["MILLAS_START_UP"] = true
             this._initialised = true
         }
+
         this._child = fork(this._bootstrap, [], {
             env: {
                 ...extra,
                 MILLAS_CHILD: '1',
                 DEBUG: process.env.APP_DEBUG,
+                MILLAS_HOST: process.env.MILLAS_HOST,
+                MILLAS_PORT: process.env.MILLAS_PORT,
             },
             stdio: 'inherit',
         });

@@ -51,7 +51,7 @@ class HttpServer {
         const port = this._resolvePort();
         const host = this._options.host
             || process.env.MILLAS_HOST
-            || process.env.HOST
+            || process.env.APP_HOST
             || 'localhost';
 
         // Boot providers if not already done

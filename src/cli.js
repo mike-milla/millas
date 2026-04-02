@@ -1,8 +1,4 @@
 'use strict';
-
-// Load .env before anything else so all commands have access to env vars
-require('dotenv').config();
-
 // Set CLI mode globally for all commands
 process.env.MILLAS_CLI_MODE = 'true';
 
