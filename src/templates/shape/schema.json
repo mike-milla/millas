@@ -1,0 +1,19 @@
+{
+  "name": "shape",
+  "description": "Generate a new validation shape",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Shape name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/shapes/{{ name | pascalCase }}Shape.js"
+    }
+  ]
+}

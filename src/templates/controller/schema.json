@@ -1,0 +1,30 @@
+{
+  "name": "controller",
+  "description": "Generate a new controller",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Controller name"
+    }
+  ],
+  "options": [
+    {
+      "name": "resource",
+      "type": "boolean",
+      "description": "Generate resource controller with CRUD methods"
+    },
+    {
+      "name": "model",
+      "type": "string",
+      "description": "Associated model name"
+    }
+  ],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/controllers/{{ name | pascalCase }}Controller.js"
+    }
+  ]
+}

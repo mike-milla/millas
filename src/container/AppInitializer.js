@@ -72,6 +72,16 @@ class AppInitializer {
      * @returns {Application} the booted kernel
      */
     async bootKernel() {
+        // Load .env if not running via CLI (CLI loads it in src/cli.js)
+        if (!process.env.MILLAS_CLI_MODE) {
+            const path = require('path');
+            const fs = require('fs');
+            const envPath = path.resolve(process.cwd(), '.env');
+            if (fs.existsSync(envPath)) {
+                require('dotenv').config({ path: envPath, override: false });
+            }
+        }
+
         const cfg = this._config;
         const basePath = cfg.basePath || process.cwd();
 

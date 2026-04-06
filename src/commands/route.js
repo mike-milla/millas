@@ -1,82 +1,83 @@
 'use strict';
 
-const chalk = require('chalk');
-const path  = require('path');
-const fs    = require('fs-extra');
+const BaseCommand = require('../console/BaseCommand');
 
-module.exports = function (program) {
-  program
-    .command('route:list')
-    .description('List all registered routes')
-    .action(async () => {
-      const bootstrapPath = path.resolve(process.cwd(), 'bootstrap/app.js');
+class RouteCommand extends BaseCommand {
+  static description = 'Manage application routes';
 
-      if (!fs.existsSync(bootstrapPath)) {
-        console.error(chalk.red('\n  ✖ Not inside a Millas project.\n'));
-        process.exit(1);
-      }
+  async onInit(register) {
+    register
+      .command(this.list)
+      .description('List all registered routes');
+  }
 
-      process.env.MILLAS_ROUTE_LIST = 'true';
+  async list() {
+    if (!this.hasAppBootstrap()) {
+      this.error('Not inside a Millas project.');
+      throw new Error('Not inside a Millas project');
+    }
 
-      let route;
-      try {
-        const bootstrap = await require(bootstrapPath);
-        route = bootstrap.route;
-      } catch (err) {
-        console.error(chalk.red(`\n  ✖ Failed to load routes: ${err.message}\n`));
-        process.exit(1);
-      }
+    process.env.MILLAS_ROUTE_LIST = 'true';
 
-      if (!route) {
-        console.log(chalk.yellow('\n  ⚠  Bootstrap did not export { route }.\n'));
-        process.exit(0);
-      }
+    let route;
+    try {
+      const app = await this.getApp();
 
-      const rows = route.list();
+      route = app.route;
+    } catch (err) {
+      this.error(`Failed to load routes: ${err.message}`);
+      throw err;
+    }
 
-      if (rows.length === 0) {
-        console.log(chalk.yellow('\n  No routes registered.\n'));
-        return;
-      }
+    if (!route) {
+      this.warn('Bootstrap did not export { route }.');
+      return;
+    }
 
-      console.log();
-      console.log(chalk.bold('  Registered Routes\n'));
+    const rows = route.list();
 
-      const col = {
-        verb:    8,
-        path:    Math.max(6,  ...rows.map(r => r.path.length)) + 2,
-        handler: Math.max(8,  ...rows.map(r => formatHandler(r).length)) + 2,
-        mw:      Math.max(10, ...rows.map(r => (r.middleware || []).join(', ').length || 1)) + 2,
-      };
+    if (rows.length === 0) {
+      this.warn('No routes registered.');
+      return;
+    }
 
-      const header =
+    this.logger.log('');
+    this.logger.log(this.style.bold('  Registered Routes\n'));
+
+    const col = {
+      verb:    8,
+      path:    Math.max(6,  ...rows.map(r => r.path.length)) + 2,
+      handler: Math.max(8,  ...rows.map(r => formatHandler(r).length)) + 2,
+      mw:      Math.max(10, ...rows.map(r => (r.middleware || []).join(', ').length || 1)) + 2,
+    };
+
+    const header =
+      '  ' +
+      this.style.bold(pad('METHOD',     col.verb)) +
+      this.style.bold(pad('PATH',       col.path)) +
+      this.style.bold(pad('HANDLER',    col.handler)) +
+      this.style.bold(pad('MIDDLEWARE', col.mw)) +
+      this.style.bold('NAME');
+
+    this.logger.log(header);
+    this.logger.log(this.style.line(col.verb + col.path + col.handler + col.mw + 10, '─').padStart(col.verb + col.path + col.handler + col.mw + 12));
+
+    for (const r of rows) {
+      const mw   = (r.middleware || []).join(', ') || this.style.secondary('—');
+      const name = r.name || this.style.secondary('—');
+      this.logger.log(
         '  ' +
-        chalk.bold(pad('METHOD',     col.verb)) +
-        chalk.bold(pad('PATH',       col.path)) +
-        chalk.bold(pad('HANDLER',    col.handler)) +
-        chalk.bold(pad('MIDDLEWARE', col.mw)) +
-        chalk.bold('NAME');
+        this.style.method(r.verb)(pad(r.verb, col.verb)) +
+        this.style.info(pad(r.path, col.path)) +
+        this.style.light(pad(formatHandler(r), col.handler)) +
+        this.style.warning(pad(mw, col.mw)) +
+        this.style.secondary(name)
+      );
+    }
 
-      console.log(header);
-      console.log(chalk.gray('  ' + '─'.repeat(col.verb + col.path + col.handler + col.mw + 10)));
-
-      for (const r of rows) {
-        const mw   = (r.middleware || []).join(', ') || chalk.gray('—');
-        const name = r.name || chalk.gray('—');
-        console.log(
-          '  ' +
-          verbChalk(r.verb)(pad(r.verb, col.verb)) +
-          chalk.cyan(pad(r.path, col.path)) +
-          chalk.white(pad(formatHandler(r), col.handler)) +
-          chalk.yellow(pad(mw, col.mw)) +
-          chalk.gray(name)
-        );
-      }
-
-      console.log(chalk.gray(`\n  ${rows.length} route(s) total.\n`));
-      process.exit(0);
-    });
-};
+    this.logger.log(this.style.secondary(`\n  ${rows.length} route(s) total.\n`));
+  }
+}
 
 function pad(str, len) { return String(str).padEnd(len); }
 
@@ -87,7 +88,4 @@ function formatHandler(r) {
   return r.method ? `${name}@${r.method}` : name;
 }
 
-function verbChalk(verb) {
-  return { GET: chalk.green, POST: chalk.blue, PUT: chalk.yellow,
-           PATCH: chalk.magenta, DELETE: chalk.red }[verb] || chalk.white;
-}
+module.exports = RouteCommand;

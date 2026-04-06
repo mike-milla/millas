@@ -1,75 +1,101 @@
 'use strict';
 
-const chalk = require('chalk');
-const { makeController, makeModel, makeMiddleware, makeService, makeJob, makeMigration, makeShape, makeCommand } = require('../scaffold/maker');
+const path = require('path');
+const BaseCommand = require('../console/BaseCommand');
+const SchematicEngine = require('../schematics/SchematicEngine');
 
-module.exports = function (program) {
+class MakeCommand extends BaseCommand {
+  static description = 'Generate application scaffolding';
 
-  program
-    .command('make:controller <name>')
-    .description('Generate a new controller')
-    .option('--resource', 'Generate a resource controller with CRUD methods')
-    .action(async (name, options) => {
-      await run('Controller', () => makeController(name, options));
-    });
+  #engine = new SchematicEngine(path.join(__dirname, '../templates'));
 
-  program
-    .command('make:model <name>')
-    .description('Generate a new model')
-    .option('-m, --migration', 'Also create a migration file')
-    .action(async (name, options) => {
-      await run('Model', () => makeModel(name, options));
-    });
+  async onInit(register) {
+    register
+      .command(async (name, resource,model) => {
+        const result = await this.#generate('controller', name, {resource,model});
+        this.success(`Created: ${result.path}`);
+      })
+      .name('controller')
+      .arg('name')
+      .arg('--resource')
+      .arg('--model', v => v.string())
+      .description('Generate a new controller');
 
-  program
-    .command('make:middleware <name>')
-    .description('Generate a new middleware')
-    .action(async (name) => {
-      await run('Middleware', () => makeMiddleware(name));
-    });
+    register
+      .command(async (name, migration) => {
+          console.log(name,migration)
+        const timestamp = Date.now();
+        const results = await this.#generate('model', name, { migration, timestamp });
+        if (Array.isArray(results)) {
+          results.forEach(r => this.success(`Created: ${r.path}`));
+        } else {
+          this.success(`Created: ${results.path}`);
+        }
+      })
+      .name('model')
+      .arg('name')
+      .arg('--migration')
+      .description('Generate a new model');
 
-  program
-    .command('make:service <name>')
-    .description('Generate a new service class')
-    .action(async (name) => {
-      await run('Service', () => makeService(name));
-    });
+    register
+      .command(async (name) => {
+        const result = await this.#generate('middleware', name);
+        this.success(`Created: ${result.path}`);
+      })
+      .name('middleware')
+      .arg('name')
+      .description('Generate a new middleware');
 
-  program
-    .command('make:job <name>')
-    .description('Generate a new background job')
-    .action(async (name) => {
-      await run('Job', () => makeJob(name));
-    });
+    register
+      .command(async (name) => {
+        const result = await this.#generate('service', name);
+        this.success(`Created: ${result.path}`);
+      })
+      .name('service')
+      .arg('name')
+      .description('Generate a new service class');
 
-  program
-    .command('make:migration <name>')
-    .description('Generate a blank migration file')
-    .action(async (name) => {
-      await run('Migration', () => makeMigration(name));
-    });
+    register
+      .command(async (name) => {
+        const result = await this.#generate('job', name);
+        this.success(`Created: ${result.path}`);
+      })
+      .name('job')
+      .arg('name')
+      .description('Generate a new background job');
 
-  program
-    .command('make:shape <n>')
-    .description('Generate a shape file with Create/Update contracts (app/shapes/)')
-    .action(async (name) => {
-      await run('Shape', () => makeShape(name));
-    });
-  program
-    .command('make:command <n>')
-    .description('Generate a new custom console command in app/commands/')
-    .action(async (name) => {
-      await run('Command', () => makeCommand(name));
-    });
+    register
+      .command(async (name) => {
+        const timestamp = Date.now();
+        const result = await this.#generate('migration', name, {timestamp });
+        this.success(`Created: ${result.path}`);
+      })
+      .name('migration')
+      .arg('name')
+      .description('Generate a blank migration file');
 
-};
+    register
+      .command(async (name) => {
+        const result = await this.#generate('shape', name);
+        this.success(`Created: ${result.path}`);
+      })
+      .name('shape')
+      .arg('name')
+      .description('Generate a shape file with Create/Update contracts (app/shapes/)');
 
-async function run(type, fn) {
-  try {
-    const filePath = await fn();
-    console.log(chalk.green(`\n  ✔ ${type} created: `) + chalk.cyan(filePath) + '\n');
-  } catch (err) {
-    console.error(chalk.red(`\n  ✖ Failed to create ${type}: ${err.message}\n`));
-    process.exit(1);
+    register
+      .command(async (name) => {
+        const result = await this.#generate('command', name);
+        this.success(`Created: ${result.path}`);
+      })
+      .name('command')
+      .arg('name')
+      .description('Generate a new custom console command in app/commands/');
+  }
+
+  async #generate(type, name, options) {
+      return await this.#engine.generate(type, {name}, options);
   }
 }
+
+module.exports = MakeCommand;

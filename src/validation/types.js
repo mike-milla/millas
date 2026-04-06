@@ -39,8 +39,8 @@ const { BaseValidator, _titleCase } = require('./BaseValidator');
 // ── StringValidator ────────────────────────────────────────────────────────────
 
 class StringValidator extends BaseValidator {
-  constructor() {
-    super('Must be a string');
+  constructor(message) {
+    super(message || 'Must be a string');
     this._type       = 'string';
     this._minLen     = null;
     this._maxLen     = null;
@@ -479,7 +479,7 @@ function _parseSize(str) {
 
 // ── Factory functions ─────────────────────────────────────────────────────────
 
-const string  = () => new StringValidator();
+const string  = (message) => new StringValidator(message);
 const email   = () => new EmailValidator();
 const number  = () => new NumberValidator();
 const boolean = () => new BooleanValidator();

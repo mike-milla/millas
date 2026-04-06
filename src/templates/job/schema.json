@@ -1,0 +1,19 @@
+{
+  "name": "job",
+  "description": "Generate a new job",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Job name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/jobs/{{ name | pascalCase }}Job.js"
+    }
+  ]
+}

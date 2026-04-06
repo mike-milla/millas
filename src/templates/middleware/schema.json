@@ -1,0 +1,19 @@
+{
+  "name": "middleware",
+  "description": "Generate a new middleware",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Middleware name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/middleware/{{ name | pascalCase }}Middleware.js"
+    }
+  ]
+}

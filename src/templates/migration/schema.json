@@ -1,0 +1,19 @@
+{
+  "name": "migration",
+  "description": "Generate a new migration",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Migration name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "database/migrations/{{ timestamp }}_{{ name | snakeCase }}.js"
+    }
+  ]
+}

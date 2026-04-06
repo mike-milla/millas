@@ -29,7 +29,7 @@ module.exports = function (program) {
     const bootstrapPath = path.join(process.cwd(), 'bootstrap/app.js');
     if (!fs.existsSync(bootstrapPath)) return;
     
-    require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+    // require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
     
     const basePath = process.cwd();
     const AppServiceProvider = require(path.join(basePath, 'providers/AppServiceProvider'));

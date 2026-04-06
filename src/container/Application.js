@@ -176,7 +176,9 @@ class Application {
             || 3000;
         const _host = host || 'localhost';
 
+
         await this._adapter.listen(_port, _host);
+        console.log(_host,_port)
 
         if (process.env.APP_ENV === "development" && process.env.MILLAS_START_UP && !process.env.MILLERS_NODE_ENV) {
             this._printStartupLog(_host, _port);
@@ -190,7 +192,9 @@ class Application {
     }
 
     _printStartupLog(host, port) {
+
         const chalk = _tryChalk();
+        printBanner(host,port,chalk)
         const routeCount = this._route.list().length;
         const url = `http://${host}:${port}`;
 
@@ -344,4 +348,35 @@ function _tryChalk() {
         p.white = id;
         return p;
     }
+}
+
+const BANNER_LINES = [
+    '  ███╗   ███╗██╗██╗     ██╗      █████╗ ███████╗',
+    '  ████╗ ████║██║██║     ██║     ██╔══██╗██╔════╝',
+    '  ██╔████╔██║██║██║     ██║     ███████║███████╗',
+    '  ██║╚██╔╝██║██║██║     ██║     ██╔══██║╚════██║',
+    '  ██║ ╚═╝ ██║██║███████╗███████╗██║  ██║███████║',
+    '  ╚═╝     ╚═╝╚═╝╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝',
+];
+
+function printBanner(host, port,chalk) {
+    const env = process.env.NODE_ENV || 'development';
+    const ver = 'v' + (require('../../package.json').version || '0.1.0');
+    const url = `http://${host}:${port}`;
+    const hr = chalk.dim('  ' + '─'.repeat(54));
+    const envColour = env === 'production' ? chalk.red
+        : env === 'staging' ? chalk.yellow
+            : chalk.green;
+
+    process.stdout.write('\n');
+    for (const line of BANNER_LINES) {
+        process.stdout.write(chalk.bold.cyan(line) + '\n');
+    }
+    process.stdout.write('\n' + hr + '\n');
+    process.stdout.write(
+        '  ' + chalk.dim(ver.padEnd(8)) +
+        chalk.dim('│') + '  ' + envColour('⬤  ' + env) + '  ' +
+        chalk.dim('│') + '  ' + chalk.bold.white(url) + '\n'
+    );
+    process.stdout.write(hr + '\n\n');
 }

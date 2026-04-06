@@ -1,176 +1,78 @@
 'use strict';
 
-const chalk = require('chalk');
-const path = require('path');
-const fs = require('fs-extra');
+const BaseCommand = require('../console/BaseCommand');
 
-module.exports = function (program) {
+class ScheduleCommand extends BaseCommand {
+  static description = 'Manage scheduled tasks';
 
-  program
-    .command('schedule:list')
-    .description('Show all scheduled tasks and their next run times')
-    .action(async () => {
-      const bootstrapPath = path.resolve(process.cwd(), 'bootstrap/app.js');
-      if (!fs.existsSync(bootstrapPath)) {
-        console.error(chalk.red('\n  ✖ Not inside a Millas project.\n'));
-        process.exit(1);
-      }
+  async onInit(register) {
+    register
+      .command(async () => {
+        const app = this.getApp();
+        const scheduler = app.make('scheduler');
+        const tasks = scheduler.getTasks();
 
-      // Boot the app to get scheduler
-      let app;
-      try {
-        app = await require(bootstrapPath);
-      } catch (e) {
-        console.error(chalk.red(`\n  ✖ Failed to load app: ${e.message}\n`));
-        process.exit(1);
-      }
+        if (tasks.length === 0) {
+          this.info('No scheduled tasks found.');
+          this.info('Create routes/schedule.js to define scheduled tasks.');
+          return;
+        }
 
-      const scheduler = app.make('scheduler');
-      const tasks = scheduler.getTasks();
-
-      console.log();
-      if (tasks.length === 0) {
-        console.log(chalk.gray('  No scheduled tasks found.'));
-        console.log(chalk.gray('  Create routes/schedule.js to define scheduled tasks.'));
-      } else {
-        console.log(chalk.bold('  Scheduled Tasks\n'));
+        this.logger.log(this.style.bold('\n  Scheduled Tasks\n'));
         
         for (const task of tasks) {
-          const status = task.isRunning() ? chalk.yellow('RUNNING') : chalk.green('READY');
+          const status = task.isRunning() 
+            ? this.style.warning('RUNNING') 
+            : this.style.success('READY');
           const nextRun = task.lastRun 
             ? `Last: ${task.lastRun.toLocaleString()}`
-            : chalk.gray('Never run');
+            : this.style.muted('Never run');
           
-          console.log(`  ${chalk.cyan(task.jobClass.name.padEnd(30))} ${status.padEnd(15)} ${nextRun}`);
+          this.logger.log(`  ${this.style.info(task.jobClass.name.padEnd(30))} ${status.padEnd(15)} ${nextRun}`);
           
           if (task.cronExpression) {
-            console.log(`    ${chalk.gray('Cron:')} ${task.cronExpression}`);
+            this.logger.log(`    ${this.style.muted('Cron:')} ${task.cronExpression}`);
           }
           
           if (Object.keys(task.parameters).length > 0) {
-            console.log(`    ${chalk.gray('Params:')} ${JSON.stringify(task.parameters)}`);
+            this.logger.log(`    ${this.style.muted('Params:')} ${JSON.stringify(task.parameters)}`);
           }
           
           if (task.failures.length > 0) {
             const lastFailure = task.failures[task.failures.length - 1];
-            console.log(`    ${chalk.red('Last failure:')} ${lastFailure.error} (${lastFailure.timestamp.toLocaleString()})`);
+            this.logger.log(`    ${this.style.danger('Last failure:')} ${lastFailure.error} (${lastFailure.timestamp.toLocaleString()})`);
           }
           
-          console.log();
+          this.logger.log('');
         }
-      }
-      
-      process.exit(0);
-    });
+      })
+      .name('list')
+      .description('Show all scheduled tasks and their next run times');
 
-  program
-    .command('schedule:test <taskName>')
-    .description('Run a specific scheduled task immediately for testing')
-    .action(async (taskName) => {
-      const bootstrapPath = path.resolve(process.cwd(), 'bootstrap/app.js');
-      if (!fs.existsSync(bootstrapPath)) {
-        console.error(chalk.red('\n  ✖ Not inside a Millas project.\n'));
-        process.exit(1);
-      }
+    register
+      .command(async (taskName) => {
+        await this.appBoot();
+        const app = this.getApp();
+        const scheduler = app.make('scheduler');
+        const tasks = scheduler.getTasks();
+        const task = tasks.find(t => t.jobClass.name === taskName);
 
-      // Boot the app
-      let app;
-      try {
-        app = await require(bootstrapPath);
-      } catch (e) {
-        console.error(chalk.red(`\n  ✖ Failed to load app: ${e.message}\n`));
-        process.exit(1);
-      }
+        if (!task) {
+          this.error(`Task "${taskName}" not found.`);
+          this.info('Available tasks:');
+          tasks.forEach(t => this.logger.log(this.style.muted(`    - ${t.jobClass.name}`)));
+          throw new Error(`Task "${taskName}" not found`);
+        }
 
-      const scheduler = app.make('scheduler');
-      const tasks = scheduler.getTasks();
-      const task = tasks.find(t => t.jobClass.name === taskName);
+        this.logger.log(this.style.primary(`\n  ▶ Running ${taskName}...\n`));
 
-      if (!task) {
-        console.error(chalk.red(`\n  ✖ Task "${taskName}" not found.\n`));
-        console.log(chalk.gray('  Available tasks:'));
-        tasks.forEach(t => console.log(chalk.gray(`    - ${t.jobClass.name}`)));
-        console.log();
-        process.exit(1);
-      }
-
-      console.log(chalk.blue(`\n  ▶ Running ${taskName}...\n`));
-
-      try {
         await scheduler._executeTask(task, new Date());
-        console.log(chalk.green(`  ✔ ${taskName} completed successfully.\n`));
-      } catch (error) {
-        console.error(chalk.red(`  ✖ ${taskName} failed: ${error.message}\n`));
-        process.exit(1);
-      }
-
-      process.exit(0);
-    });
-
-  program
-    .command('make:task <name>')
-    .description('Generate a new scheduled task class')
-    .action(async (name) => {
-      const taskName = name.endsWith('Task') ? name : `${name}Task`;
-      const taskPath = path.resolve(process.cwd(), 'app', 'tasks', `${taskName}.js`);
-
-      // Ensure directory exists
-      await fs.ensureDir(path.dirname(taskPath));
-
-      // Check if file already exists
-      if (await fs.pathExists(taskPath)) {
-        console.error(chalk.red(`\n  ✖ Task ${taskName} already exists.\n`));
-        process.exit(1);
-      }
-
-      // Generate task class
-      const template = `'use strict';
-
-const { Job } = require('millas/core/queue');
-
-/**
- * ${taskName}
- *
- * Scheduled task that runs automatically based on the schedule defined in routes/schedule.js
- *
- * Usage in routes/schedule.js:
- *   Schedule.job(${taskName}).daily().at('09:00');
- */
-class ${taskName} extends Job {
-  /**
-   * Constructor - DI container will inject dependencies automatically
-   */
-  constructor(/* inject dependencies here */) {
-    super();
-    // Store injected dependencies
-  }
-
-  /**
-   * Execute the scheduled task
-   */
-  async handle() {
-    // Implement your scheduled task logic here
-    console.log('${taskName} is running...');
-  }
-
-  /**
-   * Handle task failure (optional)
-   */
-  async failed(error) {
-    console.error('${taskName} failed:', error.message);
+        this.success(`${taskName} completed successfully.`);
+      })
+      .name('test')
+      .str('taskName', 'Task name to run')
+      .description('Run a specific scheduled task immediately for testing');
   }
 }
 
-module.exports = ${taskName};
-`;
-
-      await fs.writeFile(taskPath, template);
-
-      console.log(chalk.green(`\n  ✔ Task created: ${taskPath}`));
-      console.log(chalk.gray('\n  Next steps:'));
-      console.log(chalk.gray(`    1. Implement the handle() method in ${taskName}`));
-      console.log(chalk.gray(`    2. Add the task to routes/schedule.js:`));
-      console.log(chalk.gray(`       Schedule.job(${taskName}).daily().at('09:00');`));
-      console.log();
-    });
-};
+module.exports = ScheduleCommand;

@@ -1,0 +1,30 @@
+{
+  "name": "model",
+  "description": "Generate a new model",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Model name"
+    }
+  ],
+  "options": [
+    {
+      "name": "migration",
+      "type": "boolean",
+      "description": "Generate migration file"
+    }
+  ],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/models/{{ name | pascalCase }}.js"
+    },
+    {
+      "template": "migration.template.js",
+      "output": "database/migrations/{{ timestamp }}_create_{{ name | snakeCase | plural }}_table.js",
+      "condition": "migration"
+    }
+  ]
+}

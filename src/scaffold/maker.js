@@ -325,74 +325,134 @@ async function makeShape(name) {
   return write(filePath, lines.join('\n'));
 }
 async function makeCommand(name) {
-  // If name contains ':' it's a namespaced signature like 'email:SendDigest'.
-  // Split off the namespace prefix and use only the last segment for the
-  // class name / filename, but keep the full input as the signature.
-  const parts      = name.split(':');
-  const basePart   = parts[parts.length - 1];                        // e.g. 'SendDigest'
-  const cleanBase  = basePart.replace(/Command$/i, '');              // strip trailing Command
-  const className  = pascalCase(cleanBase) + 'Command';              // e.g. 'SendDigestCommand'
-
-  // Build signature from the full name:
-  //   'email:SendDigest' → 'email:digest'
-  //   'SendDigest'       → 'send-digest'
-  //   'send-digest'      → 'send-digest'
-  const signatureParts = name
+  // Convert command signature to class name
+  // Examples:
+  //   'user'                  → UserCommand (subcommand group)
+  //   'send:newsletter'       → SendNewsletterCommand (simple)
+  //   'email'                 → EmailCommand (subcommand group)
+  
+  const isGroup = !name.includes(':');
+  
+  const parts = name
     .replace(/Command$/i, '')
     .split(':')
-    .map((seg, i, arr) => {
-      // Last segment: strip camelCase — 'SendDigest' → 'send-digest'
-      if (i === arr.length - 1) {
-        return seg
-          .replace(/([a-z])([A-Z])/g, '$1-$2')
-          .toLowerCase();
-      }
-      // Namespace segments: lowercase as-is
-      return seg.toLowerCase();
-    });
-  const signature = signatureParts.join(':');
+    .map(part => pascalCase(part));
+  
+  const className = parts.join('') + 'Command';
+  const signature = name.toLowerCase();
 
   const filePath = resolveAppPath('app/commands', `${className}.js`);
 
-  const content = `'use strict';
+  let content;
+  
+  if (isGroup) {
+    // Generate subcommand group template
+    content = `'use strict';
 
-const { Command } = require('millas/console');
+const { BaseCommand } = require('millas/console');
 
 /**
  * ${className}
  *
- * Run with:  millas call ${signature}
+ * Command group - methods become subcommands automatically.
+ * Class name auto-derived: ${className} → ${signature}:*
+ *
+ * Examples:
+ *   millas ${signature}:create --name <value>
+ *   millas ${signature}:update <id> --name <value>
+ *   millas ${signature}:delete <id>
  */
-class ${className} extends Command {
-  static signature   = '${signature}';
-  static description = 'Description of ${signature}';
+class ${className} extends BaseCommand {
+  // Optional: Add descriptions for subcommands
+  // static commands = {
+  //   create: 'Create a new ${signature}',
+  //   update: 'Update a ${signature}',
+  //   delete: 'Delete a ${signature}',
+  // };
 
-  // Optional: positional arguments
-  // static args = [
-  //   { name: 'target', description: 'The target to act on', default: 'all' },
-  // ];
+  // Private helper (underscore = not a command)
+  // async _get${pascalCase(signature)}(id) {
+  //   return this.container.resolve('Database')
+  //     .table('${signature}s').find(id);
+  // }
 
-  // Optional: named options / flags
-  // static options = [
-  //   { flag: '--dry-run',    description: 'Preview without making changes' },
-  //   { flag: '--limit <n>',  description: 'Max items to process', default: '50' },
-  // ];
+  // Subcommand: Only options
+  async create({ name }) {
+    // millas ${signature}:create --name <value>
+    this.info('Creating ${signature}...');
+    this.success('${pascalCase(signature)} created!');
+  }
 
-  async handle() {
-    // const target = this.argument('target');
-    // const limit  = this.option('limit');
-    // const dry    = this.option('dryRun');
+  // Subcommand: Positional + options
+  async update(id, { name }) {
+    // millas ${signature}:update <id> --name <value>
+    this.info(\`Updating ${signature} \${id}...\`);
+    this.success('${pascalCase(signature)} updated!');
+  }
 
-    this.info('Running ${signature}...');
-
-    // Your command logic here
-
-    this.success('Done.');
+  // Subcommand: Only positional
+  async delete(id) {
+    // millas ${signature}:delete <id>
+    this.info(\`Deleting ${signature} \${id}...\`);
+    this.success('${pascalCase(signature)} deleted!');
   }
 }
 
 module.exports = ${className};
 `;
+  } else {
+    // Generate simple command template
+    content = `'use strict';
+
+const { BaseCommand } = require('millas/console');
+
+/**
+ * ${className}
+ *
+ * Simple command - uses handle() method.
+ * Command name auto-derived: ${className} → ${signature}
+ * Run with: millas ${signature}
+ */
+class ${className} extends BaseCommand {
+  static description = 'Description of ${signature}';
+  
+  // Optional: simple options (declarative)
+  // static options = [
+  //   { flags: '--dry-run', description: 'Preview without making changes' },
+  //   { flags: '--limit <n>', description: 'Max items', defaultValue: '50' },
+  // ];
+
+  // Optional: custom arguments (advanced)
+  // addArguments(parser) {
+  //   parser
+  //     .argument('<file>', 'Input file path')
+  //     .argument('[output]', 'Output file path', 'output.txt')
+  //     .option('--force', 'Force overwrite');
+  // }
+
+  // Optional: validate inputs before execution
+  // async validate(...args) {
+  //   if (!args[0]) {
+  //     throw new Error('Missing required argument');
+  //   }
+  // }
+
+  async handle(options) {
+    // Access options: options.dryRun, options.limit, etc.
+    // Access DI container: this.container.resolve('ServiceName')
+    // Logging helpers: this.info(), this.success(), this.warn(), this.error()
+
+    this.info('Running ${signature}...');
+
+    // Your command logic here
+
+    this.success('Done!');
+  }
+}
+
+module.exports = ${className};
+`;
+  }
 
   return write(filePath, content);
 }

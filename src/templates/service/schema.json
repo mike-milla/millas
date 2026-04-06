@@ -1,0 +1,19 @@
+{
+  "name": "service",
+  "description": "Generate a new service",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Service name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/services/{{ name | pascalCase }}Service.js"
+    }
+  ]
+}

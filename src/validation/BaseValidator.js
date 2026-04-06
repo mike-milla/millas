@@ -14,6 +14,7 @@ class BaseValidator {
    * @param {string} [typeError] — message shown when the value fails the base type check
    */
   constructor(typeError) {
+    this._type       = undefined;
     this._typeError    = typeError || null;
     this._required     = false;
     this._requiredMsg  = null;
@@ -162,6 +163,8 @@ class BaseValidator {
    */
   async run(value, key, allData = {}) {
     const label = this._fieldLabel(key);
+    if (this._type === undefined || this._type === null)
+      throw new Error(`[Millas] Validator for "${key}" has no known type.`);
 
     // ── Apply default ───────────────────────────────────────────────────────
     if (this._isEmpty(value) && this._defaultValue !== undefined) {

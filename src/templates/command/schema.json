@@ -1,0 +1,19 @@
+{
+  "name": "command",
+  "description": "Generate a new CLI command",
+  "arguments": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Command name"
+    }
+  ],
+  "options": [],
+  "files": [
+    {
+      "template": "default.template.js",
+      "output": "app/commands/{{ name | pascalCase }}Command.js"
+    }
+  ]
+}
