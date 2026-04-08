@@ -236,7 +236,7 @@ class AppInitializer {
             } else {
                 env = nunjucks.configure(viewsDir, {
                     autoescape:    viewsConfig.autoescape    ?? true,
-                    watch:         viewsConfig.watch         ?? (process.env.NODE_ENV !== 'production'),
+                    watch:         viewsConfig.watch         ?? (process.env.NODE_ENV !== 'production' && !process.env.MILLAS_CLI_MODE),
                     noCache:       viewsConfig.noCache       ?? (process.env.NODE_ENV !== 'production'),
                     throwOnUndefined: viewsConfig.throwOnUndefined ?? false,
                     express:       expressApp,

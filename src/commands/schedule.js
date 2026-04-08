@@ -1,8 +1,8 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 
-class ScheduleCommand extends BaseCommand {
+class ScheduleCommand extends Command {
   static description = 'Manage scheduled tasks';
 
   async onInit(register) {

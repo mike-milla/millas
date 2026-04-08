@@ -45,21 +45,7 @@ class CommandContext {
   isMillasProject() {
     const fs = require('fs');
     const path = require('path');
-    
-    const pkgPath = path.join(this.cwd, 'package.json');
-    if (!fs.existsSync(pkgPath)) {
-      return false;
-    }
-    
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      // Check for millas marker in package.json
-      return pkg.millas === true || 
-             (pkg.dependencies && 'millas' in pkg.dependencies) ||
-             (pkg.devDependencies && 'millas' in pkg.devDependencies);
-    } catch {
-      return false;
-    }
+    return fs.existsSync(path.join(this.cwd, 'millas.config.js'));
   }
 }
 

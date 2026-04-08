@@ -45,26 +45,63 @@ class CommandRegistry {
    */
   async loadCommand(commandPath) {
     const CommandClass = require(commandPath);
-    const BaseCommand = require('./BaseCommand');
-    
-    // Support both class-based and function-based commands
-    if (typeof CommandClass === 'function') {
-      // Check if it's a class extending BaseCommand
-      if (CommandClass.prototype instanceof BaseCommand) {
-        const commandInstance = new CommandClass(this.context);
-        await commandInstance.register(); // Now async
-        this.commands.set(commandPath, commandInstance);
-      }
-      // Legacy function-based command (backward compatibility)
-      // else if (CommandClass.length === 1) { // expects (program) argument
-      //   CommandClass(this.context.program);
-      //   this.commands.set(commandPath, CommandClass);
-      // }
-      // Invalid command export
-      // else {
-      //   throw new Error(`Invalid command export in ${commandPath}. Must extend BaseCommand or export function(program).`);
-      // }
+    const Command = require('./Command');
+
+    if (typeof CommandClass !== 'function' || !(CommandClass.prototype instanceof Command)) return;
+
+    const commandInstance = new CommandClass(this.context);
+    commandInstance._filename = path.basename(commandPath, '.js');
+
+    // Collect subcommand names the user intends to register
+    // by running onInit against a dry registrar that only records names
+    const namespace = commandInstance.constructor.namespace
+      || commandInstance._filename.toLowerCase();
+
+    const userSubcommandNames = await this.#collectSubcommandNames(commandInstance, namespace);
+
+    // Remove any conflicting built-in subcommands from Commander
+    for (const fullName of userSubcommandNames) {
+      const existing = this.context.program.commands.findIndex(c => c.name() === fullName);
+      if (existing !== -1) this.context.program.commands.splice(existing, 1);
     }
+
+    await commandInstance.register();
+    this.commands.set(namespace, commandInstance);
+  }
+
+  async #collectSubcommandNames(instance, namespace) {
+    if (typeof instance.onInit !== 'function') return [namespace];
+
+    const names = [];
+    const dryRegistrar = {
+      _last: null,
+      command(fn) { this._last = { name: fn.name || 'anonymous' }; return this; },
+      name(n)    { if (this._last) this._last.name = n; return this; },
+      // absorb all chaining methods
+      ...Object.fromEntries(
+        ['arg','str','num','bool','email','enum','option','argument',
+         'description','aliases','before','after','validate','onError']
+          .map(m => [m, function() { return this; }])
+      ),
+      _flush(ns) {
+        if (this._last) {
+          names.push(this._last.name === ns ? ns : `${ns}:${this._last.name}`);
+          this._last = null;
+        }
+      },
+    };
+
+    // Wrap command() to flush previous before starting next
+    const origCommand = dryRegistrar.command.bind(dryRegistrar);
+    dryRegistrar.command = function(fn) {
+      this._flush(namespace);
+      return origCommand(fn);
+    };
+
+    await instance.onInit(dryRegistrar);
+    dryRegistrar._flush(namespace);
+
+    return names;
   }
 
   /**

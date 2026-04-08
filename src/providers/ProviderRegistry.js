@@ -77,8 +77,11 @@ class ProviderRegistry {
     }
 
     // Phase 2: boot all providers (async-safe)
+    // Providers with static cli = false are skipped in CLI mode
+    const isCli = !!process.env.MILLAS_CLI_MODE;
     for (const provider of this._providers) {
       if (typeof provider.boot === 'function') {
+        if (isCli && provider.constructor.cli === false) continue;
         await provider.boot(this._container, this._app);
       }
     }

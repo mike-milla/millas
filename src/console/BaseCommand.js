@@ -47,8 +47,13 @@ const v = require("../core/validation");
  * Base class for all CLI commands
  */
 class BaseCommand extends AppCommand {
-  static command = '';
-  static namespace = ''; // Override to set custom namespace
+  static namespace = ''; // Override to set a fixed command name
+
+   /**
+   * Short description shown in `millas --help` and `millas list`.
+   *
+   * @type {string}
+   */
   static description = '';
   static aliases = [];
   static options = [];
@@ -68,20 +73,15 @@ class BaseCommand extends AppCommand {
   }
 
   /**
-   * Auto-derive command name from class name
-   * Supports CamelCase, underscores, and hyphens
+   * Derive command name from filename (set by CommandRegistry).
+   * Override with `static namespace = 'name'` to use a fixed name.
    */
   static getCommandName() {
-    // Use custom namespace if provided
     if (this.namespace) return this.namespace;
-    if (this.command) return this.command;
-    
-    const className = this.name.replace(/Command$/i, '');
-    if (!className) {
-      throw new Error(`Cannot derive command name from class ${this.name}`);
-    }
-    
-    return className
+
+    if (!this._filenameHint) throw new Error(`Cannot derive command name for ${this.name} — no filename hint set.`);
+
+    return this._filenameHint
       .replace(/[-_]/g, ':')
       .replace(/([A-Z]+)([A-Z][a-z])/g, '$1:$2')
       .replace(/([a-z\d])([A-Z])/g, '$1:$2')
@@ -104,6 +104,8 @@ class BaseCommand extends AppCommand {
    * Calls onInit() for subcommands or registerSimpleCommand() for simple commands
    */
   async register() {
+    // Expose filename to static getCommandName()
+    if (this._filename) this.constructor._filenameHint = this._filename;
     const commandName = this.constructor.getCommandName();
     const subcommands = this.getSubcommands();
 
@@ -230,21 +232,67 @@ class BaseCommand extends AppCommand {
     
     process.exitCode = 1;
   }
-
+/**
+   * Success message (green ✔).
+   * @param {string} message
+   */
   success(message) {
     this.logger.log(this.style.success(`\n  ✔ ${message}\n`));
   }
-
+  /**
+   * Informational message (cyan).
+   * @param {string} message
+   */
   info(message) {
     this.logger.log(this.style.info(`  ${message}`));
   }
-
+/**
+   * Warning message (yellow ⚠).
+   * @param {string} message
+   */
   warn(message) {
     this.logger.log(this.style.warning(`  ⚠ ${message}`));
   }
-
+/**
+   * Error message (red ✖). Does NOT exit — use fail() to exit.
+   * @param {string} message
+   */
   error(message) {
     this.logger.error(this.style.danger(`  ✖ ${message}`));
+  }
+
+  /**
+   * Write a plain line to stdout.
+   * @param {string} [msg='']
+   */
+  line(msg = '') {
+    process.stdout.write(msg + '\n');
+  }
+
+  /**
+   * Write a blank line.
+   */
+  newLine() {
+    process.stdout.write('\n');
+  }
+
+
+
+
+  /**
+   * Dimmed / comment message.
+   * @param {string} msg
+   */
+  comment(msg) {
+    this.line(chalk.dim(`// ${msg}`));
+  }
+    /**
+   * Print an error and exit with code 1.
+   * @param {string} msg
+   */
+  fail(msg) {
+    this.error(msg);
+    process.exit(1);
   }
 }
 
@@ -330,9 +378,13 @@ class CommandRegistrar {
     }
 
     const isFlag = name.startsWith('--') || name.startsWith('-');
-    const cleanName = name.replace(/^--?/, '').replace(/^\[|\]$/g, '');
-    let validator = null;
+    const isOptional = /^\[.*\]$/.test(name);
+    const cleanName = name
+    .replace(/^--?/, '')
+    .replace(/^\[|]$/g, '');let validator = null;
     let desc = description;
+
+
     
     if (typeof validatorOrDescription === 'string') {
       desc = validatorOrDescription;
@@ -346,6 +398,9 @@ class CommandRegistrar {
         desc = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
       }
     }
+     if (isOptional && validator && typeof validator.optional === 'function') {
+    validator = validator.optional();
+  }
     
     this.lastCommand.args.push({
       name: cleanName,

@@ -1,18 +1,18 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const fs = require('fs');
 const path = require('path');
 
-class KeyCommand extends BaseCommand {
+class KeyCommand extends Command {
   static description = 'Manage application encryption keys';
 
   async onInit(register) {
     register
       .command(this.generate)
-      .arg('--show', 'Print the key without writing to .env')
-      .arg('--force', 'Overwrite existing APP_KEY without confirmation')
-      .arg('--cipher', v=>v.string(),'Cipher to use (default: AES-256-CBC)')
+      .bool('show', 'Print the key without writing to .env')
+      .bool('force', 'Overwrite existing APP_KEY without confirmation')
+      .str('--cipher', v => v.optional(), 'Cipher to use (default: AES-256-CBC)')
       .description('Generate a new application key and write it to .env');
   }
 
@@ -27,7 +27,7 @@ class KeyCommand extends BaseCommand {
     }
 
     if (show) {
-      this.logger.log('\n  ' + this.style.info(key) + '\n');
+      this.info(key);
       return;
     }
 
@@ -35,7 +35,7 @@ class KeyCommand extends BaseCommand {
 
     if (!fs.existsSync(envPath)) {
       this.error('.env file not found.');
-      this.logger.error(this.style.muted('     Run: millas new <project>  or create a .env file first.\n\n'));
+      this.error(this.style.muted('Run: millas new <project>  or create a .env file first.\n\n'));
       throw new Error('.env file not found');
     }
 
@@ -45,16 +45,9 @@ class KeyCommand extends BaseCommand {
     const hasValue = existing && existing[1] && existing[1].trim() !== '';
 
     if (hasValue && !force) {
-      const readline = require('readline');
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await new Promise(resolve => {
-        rl.question(
-          this.style.warning('\n  ⚠  APP_KEY already set. Overwrite? (y/N) '),
-          ans => { rl.close(); resolve(ans); }
-        );
-      });
-      if ((answer || '').trim().toLowerCase() !== 'y') {
-        this.logger.log(this.style.muted('\n  Key not changed.\n'));
+      const ok = await this.confirm('APP_KEY already set. Overwrite?', false);
+      if (!ok) {
+        this.comment('Key not changed.');
         return;
       }
     }
@@ -68,7 +61,7 @@ class KeyCommand extends BaseCommand {
     fs.writeFileSync(envPath, envContent, 'utf8');
 
     this.success('Application key set.');
-    this.logger.log('  ' + this.style.muted('APP_KEY=') + this.style.info(key) + '\n');
+    this.comment(this.style.muted('APP_KEY=') + this.style.info(key));
   }
 }
 

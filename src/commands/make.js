@@ -1,10 +1,10 @@
 'use strict';
 
 const path = require('path');
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const SchematicEngine = require('../schematics/SchematicEngine');
 
-class MakeCommand extends BaseCommand {
+class MakeCommand extends Command {
   static description = 'Generate application scaffolding';
 
   #engine = new SchematicEngine(path.join(__dirname, '../templates'));
@@ -16,9 +16,9 @@ class MakeCommand extends BaseCommand {
         this.success(`Created: ${result.path}`);
       })
       .name('controller')
-      .arg('name')
-      .arg('--resource')
-      .arg('--model', v => v.string())
+      .str('name')
+      .str('--resource')
+      .str('--model')
       .description('Generate a new controller');
 
     register

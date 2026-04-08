@@ -31,10 +31,28 @@ program.configureHelp({
   sortOptions: true,
 });
 
-// Handle --debug flag globally
-program.hook('preAction', (thisCommand) => {
+// Handle --debug flag globally and boot app before any command runs
+program.hook('preAction', async (thisCommand) => {
   if (thisCommand.opts().debug) {
-    process.env.DEBUG = 'true';
+    process.env.APP_DEBUG = 'true';
+  }
+
+  if (context.isMillasProject()) {
+    const bootstrapPath = require('path').join(context.cwd, 'bootstrap/app.js');
+    if (require('fs').existsSync(bootstrapPath)) {
+      await require(bootstrapPath);
+    }
+  }
+});
+
+// Close DB connection pool after CLI command finishes
+program.hook('postAction', async () => {
+  try {
+
+    const DatabaseManager = require('./orm/drivers/DatabaseManager');
+    await DatabaseManager.closeAll();
+  } catch(e) {
+    console.log(e)
   }
 });
 
@@ -56,6 +74,7 @@ async function bootstrap() {
 
   // Auto-discover user-defined commands (if inside a Millas project)
   if (context.isMillasProject()) {
+
     await registry.discoverUserCommands();
   }
 }

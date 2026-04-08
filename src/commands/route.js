@@ -1,8 +1,8 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 
-class RouteCommand extends BaseCommand {
+class RouteCommand extends Command {
   static description = 'Manage application routes';
 
   async onInit(register) {

@@ -2,10 +2,10 @@
 
 const path = require('path');
 const fs = require('fs-extra');
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const DB = require('../facades/DB');
 
-class MigrateCommand extends BaseCommand {
+class MigrateCommand extends Command {
   static description = 'Database migration commands';
   static namespace = 'db';
 

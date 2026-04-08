@@ -1,12 +1,12 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const fs = require('fs-extra');
 const path = require('path');
 const ora = require('ora');
 const { generateProject } = require('../scaffold/generator');
 
-class NewCommand extends BaseCommand {
+class NewCommand extends Command {
   static description = 'Create a new Millas project';
 
   async onInit(register) {

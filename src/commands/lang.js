@@ -1,32 +1,31 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const path = require('path');
 const fs = require('fs');
-const {string} = require("../core/validation");
 
 const DEFAULT_NS = 'messages';
 
-class LangCommand extends BaseCommand {
+class LangCommand extends Command {
   static description = 'Manage application translations';
 
   async onInit(register) {
     register
       .command(this.publish)
-      .arg('locale', 'Target locale (e.g., sw, fr)')
-      .arg('namespace',v=>v.string(),  'Specific namespace to publish')
-      .arg('--defaults', 'Include built-in Millas framework strings')
-      .arg('--fresh', 'Clear namespace files and rebuild from scratch')
-      .arg('--all', 'Publish to every locale in lang/')
-      .arg('--list', 'List available locales and exit')
-      .arg('--dry-run', 'Preview changes without writing')
-      .arg('--format',v=>v.string(), 'File format: js or json (default: js)')
-      .arg('--src',v=>v.string(), 'Extra directory to scan')
+      .str('[locale]', 'Target locale (e.g., sw, fr)')
+      .str('[namespace]', 'Specific namespace to publish')
+      .bool('defaults', 'Include built-in Millas framework strings')
+      .bool('fresh', 'Clear namespace files and rebuild from scratch')
+      .bool('all', 'Publish to every locale in lang/')
+      .bool('list', 'List available locales and exit')
+      .bool('dry-run', 'Preview changes without writing')
+      .str('[--format]', 'File format: js or json (default: js)')
+      .str('[--src]', 'Extra directory to scan')
       .description('Extract _() strings from app/ and write to lang/<locale>/<namespace>.js');
 
     register
       .command(this.missing)
-      .arg('locale', 'Target locale to check')
+      .str('[locale]', 'Target locale to check')
       .description('Show untranslated keys in locale files');
 
     register
@@ -35,7 +34,8 @@ class LangCommand extends BaseCommand {
 
     register
       .command(this.keys)
-      .arg('--src',v=>v.string(), 'Extra directory to scan')
+      .str('[--src]', 'Extra directory to scan')
+      .bool('ns', 'Group by namespace')
       .description('List all _() keys found in source files, grouped by namespace');
   }
 

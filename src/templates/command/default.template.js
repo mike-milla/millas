@@ -1,12 +1,15 @@
-module.exports = `const { BaseCommand } = require('millas/src/console');
+module.exports = `const { Command } = require('millas/console');
 
-class {{ name | pascalCase }}Command extends BaseCommand {
-  static signature = '{{ name | kebabCase }}';
+class {{ name | pascalCase }}Command extends Command {
   static description = '{{ name | pascalCase }} command description';
 
-  async run(args, opts) {
-    this.info('Running {{ name | pascalCase }}Command');
-    // Command logic here
+  async onInit(register) {
+    register
+      .command(async () => {
+        this.info('Running {{ name | pascalCase }}');
+        // Command logic here
+      })
+      .description('{{ name | pascalCase }} command description');
   }
 }
 

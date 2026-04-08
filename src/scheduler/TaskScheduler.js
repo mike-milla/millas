@@ -69,7 +69,7 @@ class TaskScheduler {
    * Start the scheduler
    */
   start() {
-    if (!this._config.enabled || this._running) return;
+    if (!this._config.enabled || this._running || process.env.MILLAS_CLI_MODE) return;
 
     this._running = true;
     

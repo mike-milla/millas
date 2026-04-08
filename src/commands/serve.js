@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const { fork } = require('child_process');
 const chokidar = require('chokidar');
-const BaseCommand = require('../console/BaseCommand');
+const Command = require('../console/Command');
 const patchConsole = require('../logger/patchConsole');
 const Logger = require('../logger/internal');
 
@@ -46,6 +46,7 @@ class HotReloader {
         ...process.env,
         ...extra,
         MILLAS_CHILD: '1',
+        MILLAS_CLI_MODE: true,
       },
       stdio: 'inherit',
     });
@@ -136,7 +137,7 @@ class HotReloader {
   }
 }
 
-class ServeCommand extends BaseCommand {
+class ServeCommand extends Command {
   static description = 'Start the development server with hot reload';
 
   async onInit(register) {

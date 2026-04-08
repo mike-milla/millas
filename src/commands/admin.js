@@ -1,12 +1,12 @@
 'use strict';
 
-const BaseCommand = require('../console/BaseCommand');
 const path = require('path');
 const fs = require('fs-extra');
-const readline = require('readline');
 const Hasher = require('../auth/Hasher');
+const Command = require("../console/Command");
+const DB = require("../facades/DB");
 
-class CreateSuperUserCommand extends BaseCommand {
+class AdminCommand extends Command {
   static description = 'Manage superusers and admin accounts';
 
   async onInit(register) {
@@ -14,14 +14,15 @@ class CreateSuperUserCommand extends BaseCommand {
       .command(async (email, name, noinput) => {
         const { User } = await this.#resolveUserModel();
 
-        this.logger.log(this.style.info('\n  Create Millas Superuser\n'));
+        this.info('Create Millas Superuser');
+        this.newLine()
 
         // Email
-        if (!email) email = await this.#prompt('  Email address: ');
-        email = (email || '').trim().toLowerCase();
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          throw new Error('Enter a valid email address.');
-        }
+        if (!email) email = await this.ask('Email address:', null, v => {
+          const t = v.trim().toLowerCase();
+          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t) || 'Enter a valid email address.';
+        });
+        email = email.trim().toLowerCase();
 
         const existing = await User.findBy('email', email);
         if (existing) {
@@ -32,10 +33,8 @@ class CreateSuperUserCommand extends BaseCommand {
           );
         }
 
-        // Name
-        if (!name && !noinput) {
-          name = await this.#prompt('  Display name (optional, press Enter to skip): ');
-        }
+        if (!name && !noinput)
+          name = await this.ask('Display name (optional):', email.split('@')[0]);
         name = (name || '').trim() || email.split('@')[0];
 
         // Password
@@ -46,12 +45,8 @@ class CreateSuperUserCommand extends BaseCommand {
             throw new Error('--noinput requires ADMIN_PASSWORD to be set in the environment.');
           }
         } else {
-          plainPassword = await this.#promptPassword('  Password: ');
-          const confirm = await this.#promptPassword('  Password (again): ');
-          if (plainPassword !== confirm) throw new Error('Passwords do not match.');
+          plainPassword = await this.#promptPasswordWithBypass('Password:');
         }
-
-        this.#validatePassword(plainPassword);
 
         const hash = await Hasher.make(plainPassword);
 
@@ -77,18 +72,18 @@ class CreateSuperUserCommand extends BaseCommand {
       .command(async (email) => {
         const { User } = await this.#resolveUserModel();
 
-        if (!email) email = await this.#prompt('\n  Email address: ');
-        email = (email || '').trim().toLowerCase();
+        if (!email) email = await this.ask('Email address:', null, v =>
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) || 'Enter a valid email address.'
+        );
+        email = email.trim().toLowerCase();
 
         const user = await User.findBy('email', email);
         if (!user) throw new Error(`No user found with email "${email}".`);
 
-        this.logger.log(this.style.info(`\n  Changing password for: ${user.email}\n`));
+        this.info(`Changing password for: ${user.email}`);
+        this.newLine();
 
-        const plain = await this.#promptPassword('  New password: ');
-        const confirm = await this.#promptPassword('  New password (again): ');
-        if (plain !== confirm) throw new Error('Passwords do not match.');
-        this.#validatePassword(plain);
+        const plain = await this.#promptPasswordWithBypass('New password:');
 
         const hash = await Hasher.make(plain);
 
@@ -101,7 +96,7 @@ class CreateSuperUserCommand extends BaseCommand {
       })
       .name('changepassword')
       .str('[email]', v => v.email().optional(), 'Email address of the user')
-      .description("Change a user's password in the users table");
+      .description("Change a user's password in the users table")
 
     register
       .command(async () => {
@@ -131,21 +126,27 @@ class CreateSuperUserCommand extends BaseCommand {
       .description('List all staff/superusers from the users table');
   }
 
-  async #resolveUserModel() {
-    const configPath = path.join(this.cwd, 'config/database.js');
-    if (!fs.existsSync(configPath)) {
-      throw new Error('config/database.js not found. Are you inside a Millas project?');
+    async after(...args) {
+        await DB.closeAll()
     }
 
-    const dbConfig = require(configPath);
-    let DatabaseManager;
-    try {
-      DatabaseManager = require(path.join(this.cwd, 'node_modules/millas/src/orm/drivers/DatabaseManager'));
-    } catch {
-      DatabaseManager = require('../orm/drivers/DatabaseManager');
+    async #promptPasswordWithBypass(question) {
+    while (true) {
+      const pw = await this.secret(question, {
+        confirm: { message: `${question.replace(':', '')} (again):`, error: 'Passwords do not match.', retry: true },
+      });
+
+      if (pw.length >= 8) return pw;
+
+      this.warn('This password is too short. It must contain at least 8 characters.');
+      const bypass = await this.confirm('Bypass password validation and create user anyway?', false);
+      if (bypass) return pw;
     }
-    DatabaseManager.configure(dbConfig);
-    const db = DatabaseManager.connection();
+  }
+
+  async #resolveUserModel() {  
+
+      const db = DB.connection()
 
     let User;
     let authUserName = null;
@@ -192,30 +193,6 @@ class CreateSuperUserCommand extends BaseCommand {
     return { User, db };
   }
 
-  #validatePassword(pw) {
-    if (!pw || pw.length < 8) {
-      throw new Error('This password is too short. It must contain at least 8 characters.');
-    }
-  }
-
-  #prompt(question) {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    return new Promise(resolve => rl.question(question, ans => { rl.close(); resolve(ans); }));
-  }
-
-  #promptPassword(question) {
-    return new Promise(resolve => {
-      if (!process.stdin.isTTY) return this.#prompt(question).then(resolve);
-
-      process.stdout.write(question);
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: new (require('stream').Writable)({ write(c, e, cb) { cb(); } }),
-        terminal: true,
-      });
-      rl.question('', ans => { rl.close(); process.stdout.write('\n'); resolve(ans); });
-    });
-  }
 }
 
-module.exports = CreateSuperUserCommand;
+module.exports = AdminCommand;

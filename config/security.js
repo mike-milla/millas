@@ -98,10 +98,7 @@ module.exports = {
   |--------------------------------------------------------------------------
   | Rate Limiting
   |--------------------------------------------------------------------------
-  | global: applied to every incoming request before routes run.
-  |
-  | For stricter per-route limits (e.g. login, password reset, AI chat),
-  | apply RateLimiter middleware directly on those routes:
+  | Apply RateLimiter middleware directly on routes that need protection:
   |
   |   const { RateLimiter } = require('millas/src/http/middleware/RateLimiter');
   |
@@ -117,15 +114,11 @@ module.exports = {
   | For multi-process / multi-server deployments, use RedisRateLimitStore:
   |
   |   const { RedisRateLimitStore } = require('millas/src/http/middleware/RateLimiter');
-  |   rateLimit: { global: { store: new RedisRateLimitStore(redisClient) } }
+  |   const store = new RedisRateLimitStore(redisClient);
+  |   RateLimiter.perIp({ max: 100, windowMs: 60000, store }).middleware();
   */
   rateLimit: {
-    global: {
-      enabled:  true,
-      max:      100,                  // requests per window per IP
-      windowMs: 15 * 60 * 1000,      // 15 minutes
-      message:  'Too many requests, please try again later.',
-    },
+    // No global rate limiting by default — apply per-route as needed
   },
 
 };

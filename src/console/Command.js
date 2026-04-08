@@ -1,6 +1,7 @@
 'use strict';
 
 const chalk = require('chalk');
+const BaseCommand = require("./BaseCommand");
 
 /**
  * Command
@@ -75,45 +76,12 @@ const chalk = require('chalk');
  *   return;              — success (exit 0)
  *   this.fail(msg)       — print error + exit 1
  */
-class Command {
-  /**
-   * The CLI signature — used as the command name.
-   * Use colons for namespacing: 'email:digest', 'cache:clear', 'db:seed'
-   *
-   * @type {string}
-   */
-  static signature = '';
 
-  /**
-   * Short description shown in `millas --help` and `millas list`.
-   *
-   * @type {string}
-   */
-  static description = '';
-
-  /**
-   * Positional arguments.
-   * Each entry: { name: string, description?: string, default?: * }
-   *
-   * @type {Array<{ name: string, description?: string, default?: * }>}
-   */
-  static args = [];
-
-  /**
-   * Named options / flags.
-   * Each entry: { flag: string, description?: string, default?: * }
-   * flag examples: '--dry-run', '--limit <n>', '-f, --force'
-   *
-   * @type {Array<{ flag: string, description?: string, default?: * }>}
-   */
-  static options = [];
-
-  // ── Internal ───────────────────────────────────────────────────────────────
-
-  constructor() {
-    this._args    = {};
-    this._opts    = {};
-  }
+/**
+ * @typedef {Object} SecreteOptions
+ * @property {{mesage?:string,error?:string,retry?:boolean}} [confirm] - Needs secrete Confirmation
+ */
+class Command extends BaseCommand{
 
   /**
    * Populate the command with parsed CLI values.
@@ -128,56 +96,72 @@ class Command {
     this._opts = options || {};
   }
 
-  // ── Input ──────────────────────────────────────────────────────────────────
-
-  /**
-   * Get a positional argument value by name.
-   *
-   *   const name = this.argument('name');
-   *
-   * @param {string} name
-   * @returns {*}
-   */
-  argument(name) {
-    return this._args[name];
-  }
-
-  /**
-   * Get an option value by name (camelCase).
-   * Flags like --dry-run become dryRun.
-   *
-   *   const limit = this.option('limit');
-   *   const dry   = this.option('dryRun');
-   *
-   * @param {string} name
-   * @returns {*}
-   */
-  option(name) {
-    return this._opts[name];
-  }
-
   /**
    * Prompt the user for input.
    *
    *   const name = await this.ask('What is your name?');
+   *   const name = await this.ask('What is your name?', 'Anonymous');
+   *   const age  = await this.ask('Your age?', null, v => Number.isInteger(+v) || 'Must be a number');
    *
-   * @param {string} question
+   * @param {string}                          question
+   * @param {string|null}                     [defaultValue=null]
+   * @param {(v:string)=>true|string}         [validate]   — return true to accept, or an error string
    * @returns {Promise<string>}
    */
-  ask(question) {
-    return _prompt(question + ' ');
+  async ask(question, defaultValue = null, validate = null) {
+    const hint   = defaultValue != null ? chalk.dim(` [${defaultValue}]`) : '';
+    const prompt = `${question}${hint} `;
+
+    while (true) {
+      const raw    = await _prompt(prompt);
+      const answer = raw.trim() || (defaultValue ?? '');
+
+      if (validate) {
+        const result = validate(answer);
+        if (result !== true) {
+          this.error(typeof result === 'string' ? result : 'Invalid input.');
+          continue;
+        }
+      }
+
+      return answer;
+    }
   }
 
   /**
    * Prompt the user for a secret (input hidden — for passwords).
    *
    *   const pass = await this.secret('Password:');
+   *   const pass = await this.secret('Password:', { confirm: { message: 'Confirm:' } });
+   *   const pass = await this.secret('Password:', { validate: v => v.length >= 8 || 'Min 8 chars' });
    *
    * @param {string} question
+   * @param {{ confirm?: { message?: string, error?: string, retry?: boolean }, validate?: (v: string) => true|string }} [options]
    * @returns {Promise<string>}
    */
-  secret(question) {
-    return _promptSecret(question + ' ');
+  async secret(question, options = {}) {
+    while (true) {
+      const first = await _promptSecret(question + ' ');
+
+      if (options.validate) {
+        const result = options.validate(first);
+        if (result !== true) {
+          this.error(typeof result === 'string' ? result : 'Invalid input.');
+          continue;
+        }
+      }
+
+      if (options.confirm) {
+        const second = await _promptSecret(options.confirm.message ?? 'Confirm: ');
+        if (first !== second) {
+          this.error(options.confirm.error ?? "Inputs don't match!");
+          if (options.confirm.retry) continue;
+          return null;
+        }
+      }
+
+      return first;
+    }
   }
 
   /**
@@ -198,71 +182,8 @@ class Command {
     return trimmed === 'y' || trimmed === 'yes';
   }
 
-  // ── Output ─────────────────────────────────────────────────────────────────
 
-  /**
-   * Write a plain line to stdout.
-   * @param {string} [msg='']
-   */
-  line(msg = '') {
-    process.stdout.write(msg + '\n');
-  }
 
-  /**
-   * Write a blank line.
-   */
-  newLine() {
-    process.stdout.write('\n');
-  }
-
-  /**
-   * Informational message (cyan).
-   * @param {string} msg
-   */
-  info(msg) {
-    this.line(chalk.cyan(`  ${msg}`));
-  }
-
-  /**
-   * Success message (green ✔).
-   * @param {string} msg
-   */
-  success(msg) {
-    this.line(chalk.green(`  ✔  ${msg}`));
-  }
-
-  /**
-   * Warning message (yellow ⚠).
-   * @param {string} msg
-   */
-  warn(msg) {
-    this.line(chalk.yellow(`  ⚠  ${msg}`));
-  }
-
-  /**
-   * Error message (red ✖). Does NOT exit — use fail() to exit.
-   * @param {string} msg
-   */
-  error(msg) {
-    this.line(chalk.red(`  ✖  ${msg}`));
-  }
-
-  /**
-   * Dimmed / comment message.
-   * @param {string} msg
-   */
-  comment(msg) {
-    this.line(chalk.dim(`  // ${msg}`));
-  }
-
-  /**
-   * Print an error and exit with code 1.
-   * @param {string} msg
-   */
-  fail(msg) {
-    this.error(msg);
-    process.exit(1);
-  }
 
   /**
    * Render a simple table.
@@ -299,16 +220,7 @@ class Command {
     this.newLine();
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  /**
-   * The command's entry point. Override this in your command.
-   *
-   * @returns {Promise<void>}
-   */
-  async handle() {
-    throw new Error(`[Command] "${this.constructor.signature}" must implement handle().`);
-  }
 }
 
 // ── Prompt helpers ────────────────────────────────────────────────────────────
