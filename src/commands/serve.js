@@ -46,7 +46,6 @@ class HotReloader {
         ...process.env,
         ...extra,
         MILLAS_CHILD: '1',
-        MILLAS_CLI_MODE: true,
       },
       stdio: 'inherit',
     });

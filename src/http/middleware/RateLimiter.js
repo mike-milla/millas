@@ -178,7 +178,7 @@ const DEFAULT_OPTIONS = {
   statusCode: 429,
   keyBy:      'ip',              // 'ip' | 'user' | function(req) => string
   store:      null,              // defaults to MemoryRateLimitStore
-  skip:       null,              // optional function(req) => bool — return true to skip
+  skip:       req=>true,              // optional function(req) => bool — return true to skip
   onLimitReached: null,          // optional function(req, res, options) — called on 429
 };
 
