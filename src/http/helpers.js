@@ -46,16 +46,21 @@ function text(content, options = {}) {
 
 /**
  * Serve a file.
- * The path is automatically validated against app.storageRoot (config/app.js).
+ *
+ * filePath can be a string path, Buffer, or Readable stream.
+ * String paths are validated against app.storageRoot (config/app.js).
  * Any path that escapes the storage root throws a 403.
+ *
+ * Options: download, name, mimetype, maxAge, lastModified
  */
 function file(filePath, options = {}) {
-  const { resolveStoragePath, SafeFilePath } = require('./SafeFilePath');
-  const root = SafeFilePath.getStorageRoot();
-  if (root) {
-    // Throws PathTraversalError (403) if path escapes root
-    const safe = resolveStoragePath(filePath, root);
-    return MillasResponse.file(safe, options);
+  if (typeof filePath === 'string') {
+    const { resolveStoragePath, SafeFilePath } = require('./SafeFilePath');
+    const root = SafeFilePath.getStorageRoot();
+    if (root) {
+      const safe = resolveStoragePath(filePath, root);
+      return MillasResponse.file(safe, options);
+    }
   }
   return MillasResponse.file(filePath, options);
 }

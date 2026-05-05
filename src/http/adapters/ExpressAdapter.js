@@ -211,14 +211,17 @@ class ExpressAdapter extends HttpAdapter {
                 return expressRes.end();
 
             case 'file': {
-                const {path: filePath, download, name: fileName} = body;
+                const { path: filePath, download, name: fileName, mimetype } = body;
+                const sendOpts = {};
+                if (mimetype) expressRes.setHeader('Content-Type', mimetype);
                 if (download) {
                     return expressRes.download(
                         filePath,
-                        fileName || require('path').basename(filePath)
+                        fileName || require('path').basename(filePath),
+                        sendOpts
                     );
                 }
-                return expressRes.sendFile(require('path').resolve(filePath));
+                return expressRes.sendFile(require('path').resolve(filePath), sendOpts);
             }
 
             case 'view': {

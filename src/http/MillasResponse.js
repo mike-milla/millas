@@ -197,13 +197,50 @@ class MillasResponse {
     });
   }
 
-  /** File download / serve response */
-  static file(filePath, { download = false, name = null, headers = {} } = {}) {
+  /** File download / serve response.
+   *
+   * filePath can be:
+   *   - string  — path on disk
+   *   - Buffer  — in-memory buffer (requires mimetype)
+   *   - Readable — Node stream (requires mimetype)
+   *
+   * Options:
+   *   download    {boolean}        — force Content-Disposition: attachment
+   *   name        {string}         — filename for Content-Disposition
+   *   mimetype    {string}         — override Content-Type
+   *   maxAge      {number}         — Cache-Control max-age in seconds
+   *   lastModified {Date|string}   — override Last-Modified header
+   */
+  static file(filePath, { download = false, name = null, mimetype = null, maxAge = null, lastModified = null, headers = {} } = {}) {
+    const isBuffer   = Buffer.isBuffer(filePath);
+    const isStream   = filePath && typeof filePath.pipe === 'function';
+    const isInMemory = isBuffer || isStream;
+
+    const extraHeaders = {};
+    if (mimetype) extraHeaders['Content-Type'] = mimetype;
+    if (maxAge !== null) extraHeaders['Cache-Control'] = `public, max-age=${maxAge}`;
+    if (lastModified) extraHeaders['Last-Modified'] = new Date(lastModified).toUTCString();
+    if (download || name) {
+      extraHeaders['Content-Disposition'] =
+        `attachment; filename="${name || (typeof filePath === 'string' ? require('path').basename(filePath) : 'download')}"` ;
+    }
+
+    if (isInMemory) {
+      const { Readable } = require('stream');
+      const readable = isBuffer ? Readable.from(filePath) : filePath;
+      return new MillasResponse({
+        type: 'stream',
+        body: readable,
+        status: 200,
+        headers: { ...extraHeaders, ...headers },
+      });
+    }
+
     return new MillasResponse({
       type: 'file',
-      body: { path: filePath, download, name },
+      body: { path: filePath, download, name, mimetype, maxAge, lastModified },
       status: 200,
-      headers,
+      headers: { ...extraHeaders, ...headers },
     });
   }
 
