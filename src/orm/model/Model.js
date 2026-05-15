@@ -1005,7 +1005,8 @@ class Model {
     const fieldDefs = this.getFields();
     const result = {};
     for (const [key, val] of Object.entries(data)) {
-      result[key] = this._serializeValue(val, fieldDefs[key]?.type);
+      const dbColumn = fieldDefs[key]?.columnName || key;
+      result[dbColumn] = this._serializeValue(val, fieldDefs[key]?.type);
     }
     return result;
   }

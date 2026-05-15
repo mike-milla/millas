@@ -21,6 +21,7 @@ class FieldDefinition {
         this._fkOnDelete = options._fkOnDelete ?? 'CASCADE';
         this._fkRelatedName = options._fkRelatedName ?? null;
         this._m2mThrough = options._m2mThrough ?? null;
+        this.columnName = options.columnName || options.column_name || null;
     }
 
     nullable_(val = true) {
@@ -184,6 +185,7 @@ const fields = {
             _fkToField: opts.toField ?? 'id',
             _fkOnDelete: opts.onDelete ?? 'CASCADE',
             _fkRelatedName: opts.relatedName ?? null,
+            columnName: opts.columnName || opts.column_name || null,
         });
     },
 
@@ -206,6 +208,7 @@ const fields = {
             _fkToField: opts.toField ?? 'id',
             _fkOnDelete: opts.onDelete ?? 'CASCADE',
             _fkRelatedName: opts.relatedName ?? null,
+            columnName: opts.columnName || opts.column_name || null,
         });
     },
 

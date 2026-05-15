@@ -420,12 +420,14 @@ class QueryBuilder {
   async update(data) {
     const F     = require('./F');
     const extra = this._model._updatedAtPayload?.() ?? {};
+    const fieldDefs = this._model.getFields();
     const payload = {};
     for (const [key, val] of Object.entries({ ...data, ...extra })) {
+      const dbColumn = fieldDefs[key]?.columnName || key;
       if (val instanceof F) {
-        payload[key] = val.toKnex(this._query.client);
+        payload[dbColumn] = val.toKnex(this._query.client);
       } else {
-        payload[key] = val;
+        payload[dbColumn] = val;
       }
     }
     return this._query.update(payload);
